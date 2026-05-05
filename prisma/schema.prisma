@@ -1,0 +1,152 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+model Documento {
+  id        String   @id @default(uuid())
+  nombre    String
+  tipo      String   // PDF
+  url       String   // link descarga
+  alumnoId  String
+  createdAt DateTime @default(now())
+
+  alumno Alumno @relation(fields: [alumnoId], references: [id])
+}
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      Role
+  createdAt DateTime @default(now())
+  activo    Boolean  @default(true)
+  alumno    Alumno?
+  docente   Docente?
+
+  debeCambiarPassword Boolean @default(true)
+}
+model Asistencia {
+  id        String   @id @default(uuid())
+  fecha     DateTime @default(now())
+  estado    EstadoAsistencia
+
+  alumnoId  String
+  grupoId   String?
+
+  alumno    Alumno   @relation(fields: [alumnoId], references: [id])
+  grupo     Grupo?   @relation(fields: [grupoId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([alumnoId, fecha])
+}
+
+model Alumno {
+  id             String         @id @default(uuid())
+  matricula      String         @unique
+  userId         String         @unique
+  createdAt      DateTime       @default(now())
+  grupoId        String?
+  grupo          Grupo?         @relation(fields: [grupoId], references: [id])
+  user           User           @relation(fields: [userId], references: [id])
+  calificaciones Calificacion[]
+  pagos          Pago[]
+  asistencias Asistencia[]
+documentos  Documento[]
+}
+enum EstadoAsistencia {
+  PRESENTE
+  FALTA
+  RETARDO
+}
+
+model Docente {
+  id       String    @id @default(uuid())
+  userId   String    @unique
+  user     User      @relation(fields: [userId], references: [id])
+  materias Materia[]
+}
+
+model Programa {
+  id       String    @id @default(uuid())
+  nombre   String
+  carreras Carrera[]
+}
+
+model Carrera {
+  id         String     @id @default(uuid())
+  nombre     String
+  programaId String
+  programa   Programa   @relation(fields: [programaId], references: [id])
+  semestres  Semestre[]
+}
+
+model Semestre {
+  id        String  @id @default(uuid())
+  nombre    String
+  carreraId String
+  grupos    Grupo[]
+  carrera   Carrera @relation(fields: [carreraId], references: [id])
+}
+
+model Grupo {
+  id         String    @id @default(uuid())
+  nombre     String
+  semestreId String
+  alumnos    Alumno[]
+  semestre   Semestre  @relation(fields: [semestreId], references: [id])
+  materias   Materia[]
+  asistencias Asistencia[]
+}
+
+model Materia {
+  id             String         @id @default(uuid())
+  nombre         String
+  grupoId        String
+  docenteId      String?
+  calificaciones Calificacion[]
+  docente        Docente?       @relation(fields: [docenteId], references: [id])
+  grupo          Grupo          @relation(fields: [grupoId], references: [id])
+}
+
+model Calificacion {
+  id           String   @id @default(uuid())
+  alumnoId     String
+  materiaId    String
+  calificacion Float
+  createdAt    DateTime @default(now())
+  alumno       Alumno   @relation(fields: [alumnoId], references: [id])
+  materia      Materia  @relation(fields: [materiaId], references: [id])
+}
+
+model Cuota {
+  id        String   @id @default(uuid())
+  nombre    String
+  monto     Float
+  createdAt DateTime @default(now())
+  pagos     Pago[]
+}
+
+model Pago {
+  id       String   @id @default(uuid())
+  alumnoId String
+  concepto String
+  monto    Float
+  pagadoEn DateTime @default(now())
+  cuotaId  String?
+  alumno   Alumno   @relation(fields: [alumnoId], references: [id])
+  cuota    Cuota?   @relation(fields: [cuotaId], references: [id])
+}
+
+enum Role {
+  ADMIN
+  ALUMNO
+  CAJA
+  DIRECTOR
+  MAESTRO
+  SECRETARIA
+}
