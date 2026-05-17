@@ -16,17 +16,28 @@ import materiaRoutes from "./routes/materia.routes.js";
 import docenteRoutes from "./routes/docente.routes.js";
 import calificacionRoutes from "./routes/calificacion.routes.js";
 import reportesRoutes from "./routes/reportes.routes.js";
-import directorRoutes from "./routes/director.routes.js"; // 🔥 NUEVO
+import directorRoutes from "./routes/director.routes.js";
+import maestroRoutes from "./routes/maestro.routes.js";
 
 dotenv.config();
 
 const app = express();
 
-// 🔥 MIDDLEWARES
-app.use(cors());
+// 🔥 CORS SEGURO PRODUCCIÓN
+app.use(
+  cors({
+    origin: [
+      "http://localhost:3000",
+      "https://TU-FRONTEND.vercel.app",
+    ],
+    credentials: true,
+  })
+);
+
+// 🔥 BODY PARSER
 app.use(express.json());
 
-// 🔥 RUTAS
+// 🔥 RUTAS API
 app.use("/api/admin", adminRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/alumnos", alumnoRoutes);
@@ -39,11 +50,36 @@ app.use("/api/materias", materiaRoutes);
 app.use("/api/docentes", docenteRoutes);
 app.use("/api/calificaciones", calificacionRoutes);
 app.use("/api/reportes", reportesRoutes);
-app.use("/api/director", directorRoutes); // 🔥 CLAVE
+app.use("/api/director", directorRoutes);
+app.use("/api/maestro", maestroRoutes);
+app.use("/api/secretaria", secretariaRoutes);
+app.use("/api/caja", cajaRoutes);
+app.use("/api/asistencias", asistenciaRoutes);
 
 // 🔥 HEALTH CHECK
 app.get("/", (req, res) => {
-  res.json({ message: "SIAC Backend Running 🚀" });
+  return res.status(200).json({
+    success: true,
+    message: "SIAC Backend Running 🚀",
+  });
+});
+
+// 🔥 404 HANDLER
+app.use((req, res) => {
+  return res.status(404).json({
+    success: false,
+    message: "Endpoint no encontrado",
+  });
+});
+
+// 🔥 GLOBAL ERROR HANDLER
+app.use((err, req, res, next) => {
+  console.error("🔥 ERROR GLOBAL:", err);
+
+  return res.status(500).json({
+    success: false,
+    message: "Error interno del servidor",
+  });
 });
 
 // 🔥 PUERTO
@@ -53,7 +89,9 @@ const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`🚀 Servidor corriendo en puerto ${PORT}`);
 
-  // 🔥 DEBUG DE RUTAS (MUY IMPORTANTE)
-  console.log("🔥 RUTAS DISPONIBLES:");
-  console.log(listEndpoints(app));
+  // 🔥 DEBUG SOLO EN DESARROLLO
+  if (process.env.NODE_ENV !== "production") {
+    console.log("🔥 RUTAS DISPONIBLES:");
+    console.log(listEndpoints(app));
+  }
 });
