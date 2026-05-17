@@ -33,66 +33,80 @@ router.post(
         });
       }
 
-      const operaciones = calificaciones.map((c) => {
-        const {
+      const operaciones = calificaciones.map(
+  async (c) => {
+    const {
+      alumnoId,
+      materiaId,
+      calificacion,
+    } = c;
+
+    // 🔥 validar campos
+    if (!alumnoId || !materiaId) {
+      throw new Error(
+        "Alumno y materia son requeridos"
+      );
+    }
+
+    // 🔥 convertir número
+    const nota = Number(calificacion);
+
+    // 🔥 validar número
+    if (isNaN(nota)) {
+      throw new Error(
+        "La calificación debe ser numérica"
+      );
+    }
+
+    // 🔥 no negativos
+    if (nota < 0) {
+      throw new Error(
+        "La calificación no puede ser negativa"
+      );
+    }
+
+    // 🔥 máximo 100
+    if (nota > 100) {
+      throw new Error(
+        "La calificación no puede ser mayor a 100"
+      );
+    }
+
+    // 🔥 buscar existente
+    const existente =
+      await prisma.calificacion.findFirst({
+        where: {
           alumnoId,
           materiaId,
-          tipo,
-          calificacion,
-        } = c;
-
-        // 🔥 validar campos requeridos
-        if (!alumnoId || !materiaId || !tipo) {
-          throw new Error("Datos incompletos");
-        }
-
-        // 🔥 convertir a número seguro
-        const nota = Number(calificacion);
-
-        // 🔥 validar número
-        if (isNaN(nota)) {
-          throw new Error(
-            "La calificación debe ser numérica"
-          );
-        }
-
-        // 🔥 no negativos
-        if (nota < 0) {
-          throw new Error(
-            "La calificación no puede ser negativa"
-          );
-        }
-
-        // 🔥 rango válido
-        if (nota > 100) {
-          throw new Error(
-            "La calificación no puede ser mayor a 100"
-          );
-        }
-
-        return prisma.calificacion.upsert({
-          where: {
-            alumnoId_materiaId_tipo: {
-              alumnoId,
-              materiaId,
-              tipo,
-            },
-          },
-          update: {
-            calificacion: nota,
-          },
-          create: {
-            alumnoId,
-            materiaId,
-            tipo,
-            calificacion: nota,
-          },
-        });
+        },
       });
 
-      const result = await prisma.$transaction(
-        operaciones
-      );
+    // 🔥 actualizar si ya existe
+    if (existente) {
+      return prisma.calificacion.update({
+        where: {
+          id: existente.id,
+        },
+        data: {
+          calificacion: nota,
+        },
+      });
+    }
+
+    // 🔥 crear nueva
+    return prisma.calificacion.create({
+      data: {
+        alumnoId,
+        materiaId,
+        calificacion: nota,
+      },
+    });
+  }
+);
+
+     const result = await Promise.all(
+  operaciones
+);
 
       return res.status(200).json({
         success: true,
