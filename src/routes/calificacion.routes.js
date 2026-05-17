@@ -6,7 +6,7 @@ import { checkRole } from "../middleware/role.middleware.js";
 const router = express.Router();
 
 /* =========================================
-   📝 GUARDAR / ACTUALIZAR CALIFICACIONES
+   📝 GUARDAR CALIFICACIONES
 ========================================= */
 router.post(
   "/",
@@ -16,7 +16,6 @@ router.post(
     try {
       const calificaciones = req.body;
 
-      // 🔥 validar array
       if (!Array.isArray(calificaciones)) {
         return res.status(400).json({
           success: false,
@@ -25,96 +24,88 @@ router.post(
         });
       }
 
-      // 🔥 validar vacío
       if (calificaciones.length === 0) {
         return res.status(400).json({
           success: false,
-          message: "No hay calificaciones para guardar",
+          message:
+            "No hay calificaciones para guardar",
         });
       }
 
-      const operaciones = calificaciones.map(
-  async (c) => {
-    const {
-      alumnoId,
-      materiaId,
-      calificacion,
-    } = c;
+      const result = await Promise.all(
+        calificaciones.map(async (c) => {
+          const {
+            alumnoId,
+            materiaId,
+            calificacion,
+          } = c;
 
-    // 🔥 validar campos
-    if (!alumnoId || !materiaId) {
-      throw new Error(
-        "Alumno y materia son requeridos"
+          if (!alumnoId || !materiaId) {
+            throw new Error(
+              "Alumno y materia son requeridos"
+            );
+          }
+
+          const nota = Number(calificacion);
+
+          if (isNaN(nota)) {
+            throw new Error(
+              "La calificación debe ser numérica"
+            );
+          }
+
+          if (nota < 0) {
+            throw new Error(
+              "La calificación no puede ser negativa"
+            );
+          }
+
+          if (nota > 100) {
+            throw new Error(
+              "La calificación no puede ser mayor a 100"
+            );
+          }
+
+          const existente =
+            await prisma.calificacion.findFirst({
+              where: {
+                alumnoId,
+                materiaId,
+              },
+            });
+
+          if (existente) {
+            return prisma.calificacion.update({
+              where: {
+                id: existente.id,
+              },
+              data: {
+                calificacion: nota,
+              },
+            });
+          }
+
+          return prisma.calificacion.create({
+            data: {
+              alumnoId,
+              materiaId,
+              calificacion: nota,
+            },
+          });
+        })
       );
-    }
-
-    // 🔥 convertir número
-    const nota = Number(calificacion);
-
-    // 🔥 validar número
-    if (isNaN(nota)) {
-      throw new Error(
-        "La calificación debe ser numérica"
-      );
-    }
-
-    // 🔥 no negativos
-    if (nota < 0) {
-      throw new Error(
-        "La calificación no puede ser negativa"
-      );
-    }
-
-    // 🔥 máximo 100
-    if (nota > 100) {
-      throw new Error(
-        "La calificación no puede ser mayor a 100"
-      );
-    }
-
-    // 🔥 buscar existente
-    const existente =
-      await prisma.calificacion.findFirst({
-        where: {
-          alumnoId,
-          materiaId,
-        },
-      });
-
-    // 🔥 actualizar si ya existe
-    if (existente) {
-      return prisma.calificacion.update({
-        where: {
-          id: existente.id,
-        },
-        data: {
-          calificacion: nota,
-        },
-      });
-    }
-
-    // 🔥 crear nueva
-    return prisma.calificacion.create({
-      data: {
-        alumnoId,
-        materiaId,
-        calificacion: nota,
-      },
-    });
-  }
-);
-
-     const result = await Promise.all(
-  operaciones
-);
 
       return res.status(200).json({
         success: true,
-        message: "Calificaciones guardadas",
+        message:
+          "Calificaciones guardadas correctamente",
         data: result,
       });
     } catch (error) {
-      console.error("ERROR CALIFICACIONES:", error);
+      console.error(
+        "ERROR GUARDANDO CALIFICACIONES:",
+        error
+      );
 
       return res.status(500).json({
         success: false,
@@ -136,7 +127,6 @@ router.get(
     try {
       const { id } = req.params;
 
-      // 🔥 buscar alumno por userId
       const alumno = await prisma.alumno.findUnique({
         where: {
           userId: id,
@@ -157,6 +147,9 @@ router.get(
         include: {
           materia: true,
         },
+        orderBy: {
+          createdAt: "desc",
+        },
       });
 
       return res.status(200).json({
@@ -164,12 +157,11 @@ router.get(
         data,
       });
     } catch (error) {
-      console.error("ERROR ALUMNO:", error);
+      console.error(error);
 
       return res.status(500).json({
         success: false,
         message:
-          error.message ||
           "Error obteniendo calificaciones",
       });
     }
@@ -196,13 +188,7 @@ router.get(
               user: true,
             },
           },
-        },
-        orderBy: {
-          alumno: {
-            user: {
-              name: "asc",
-            },
-          },
+          materia: true,
         },
       });
 
@@ -211,12 +197,11 @@ router.get(
         data,
       });
     } catch (error) {
-      console.error("ERROR MATERIA:", error);
+      console.error(error);
 
       return res.status(500).json({
         success: false,
         message:
-          error.message ||
           "Error obteniendo calificaciones",
       });
     }
