@@ -52,9 +52,9 @@ app.use("/api/calificaciones", calificacionRoutes);
 app.use("/api/reportes", reportesRoutes);
 app.use("/api/director", directorRoutes);
 app.use("/api/maestro", maestroRoutes);
-app.use("/api/secretaria", secretariaRoutes);
-app.use("/api/caja", cajaRoutes);
-app.use("/api/asistencias", asistenciaRoutes);
+//app.use("/api/secretaria", secretariaRoutes);
+//app.use("/api/caja", cajaRoutes);
+//app.use("/api/asistencias", asistenciaRoutes);
 
 // 🔥 HEALTH CHECK
 app.get("/", (req, res) => {
