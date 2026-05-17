@@ -5,8 +5,9 @@ import { checkRole } from "../middleware/role.middleware.js";
 
 const router = express.Router();
 
-
-// 🔥 GUARDAR / ACTUALIZAR CALIFICACIONES
+/* =========================================
+   📝 GUARDAR / ACTUALIZAR CALIFICACIONES
+========================================= */
 router.post(
   "/",
   verifyToken,
@@ -15,25 +16,58 @@ router.post(
     try {
       const calificaciones = req.body;
 
+      // 🔥 validar array
       if (!Array.isArray(calificaciones)) {
         return res.status(400).json({
-          message: "Se espera un arreglo de calificaciones"
+          success: false,
+          message:
+            "Se espera un arreglo de calificaciones",
+        });
+      }
+
+      // 🔥 validar vacío
+      if (calificaciones.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: "No hay calificaciones para guardar",
         });
       }
 
       const operaciones = calificaciones.map((c) => {
-        const { alumnoId, materiaId, tipo, calificacion } = c;
+        const {
+          alumnoId,
+          materiaId,
+          tipo,
+          calificacion,
+        } = c;
 
+        // 🔥 validar campos requeridos
         if (!alumnoId || !materiaId || !tipo) {
           throw new Error("Datos incompletos");
         }
 
-        if (
-          typeof calificacion !== "number" ||
-          calificacion < 0 ||
-          calificacion > 100
-        ) {
-          throw new Error("Calificación inválida");
+        // 🔥 convertir a número seguro
+        const nota = Number(calificacion);
+
+        // 🔥 validar número
+        if (isNaN(nota)) {
+          throw new Error(
+            "La calificación debe ser numérica"
+          );
+        }
+
+        // 🔥 no negativos
+        if (nota < 0) {
+          throw new Error(
+            "La calificación no puede ser negativa"
+          );
+        }
+
+        // 🔥 rango válido
+        if (nota > 100) {
+          throw new Error(
+            "La calificación no puede ser mayor a 100"
+          );
         }
 
         return prisma.calificacion.upsert({
@@ -41,36 +75,46 @@ router.post(
             alumnoId_materiaId_tipo: {
               alumnoId,
               materiaId,
-              tipo
-            }
+              tipo,
+            },
           },
           update: {
-            calificacion
+            calificacion: nota,
           },
           create: {
             alumnoId,
             materiaId,
             tipo,
-            calificacion
-          }
+            calificacion: nota,
+          },
         });
       });
 
-      const result = await prisma.$transaction(operaciones);
+      const result = await prisma.$transaction(
+        operaciones
+      );
 
-      res.json(result);
-
+      return res.status(200).json({
+        success: true,
+        message: "Calificaciones guardadas",
+        data: result,
+      });
     } catch (error) {
-      console.error(error);
-      res.status(500).json({
-        error: error.message
+      console.error("ERROR CALIFICACIONES:", error);
+
+      return res.status(500).json({
+        success: false,
+        message:
+          error.message ||
+          "Error guardando calificaciones",
       });
     }
   }
 );
 
-
-// 🔥 🔥 🔥 CORREGIDO → CALIFICACIONES POR ALUMNO (USER ID)
+/* =========================================
+   👨‍🎓 CALIFICACIONES POR ALUMNO
+========================================= */
 router.get(
   "/alumno/:id",
   verifyToken,
@@ -78,37 +122,49 @@ router.get(
     try {
       const { id } = req.params;
 
-      // 🔥 primero buscar alumno por userId
+      // 🔥 buscar alumno por userId
       const alumno = await prisma.alumno.findUnique({
-        where: { userId: id }
+        where: {
+          userId: id,
+        },
       });
 
       if (!alumno) {
         return res.status(404).json({
-          message: "Alumno no encontrado"
+          success: false,
+          message: "Alumno no encontrado",
         });
       }
 
       const data = await prisma.calificacion.findMany({
-        where: { alumnoId: alumno.id },
+        where: {
+          alumnoId: alumno.id,
+        },
         include: {
-          materia: true
-        }
+          materia: true,
+        },
       });
 
-      res.json(data);
-
+      return res.status(200).json({
+        success: true,
+        data,
+      });
     } catch (error) {
-      console.error(error);
-      res.status(500).json({
-        error: error.message
+      console.error("ERROR ALUMNO:", error);
+
+      return res.status(500).json({
+        success: false,
+        message:
+          error.message ||
+          "Error obteniendo calificaciones",
       });
     }
   }
 );
 
-
-// 📄 VER CALIFICACIONES POR MATERIA
+/* =========================================
+   📚 CALIFICACIONES POR MATERIA
+========================================= */
 router.get(
   "/materia/:id",
   verifyToken,
@@ -117,29 +173,37 @@ router.get(
       const { id } = req.params;
 
       const data = await prisma.calificacion.findMany({
-        where: { materiaId: id },
+        where: {
+          materiaId: id,
+        },
         include: {
           alumno: {
             include: {
-              user: true
-            }
-          }
+              user: true,
+            },
+          },
         },
         orderBy: {
           alumno: {
             user: {
-              name: "asc"
-            }
-          }
-        }
+              name: "asc",
+            },
+          },
+        },
       });
 
-      res.json(data);
-
+      return res.status(200).json({
+        success: true,
+        data,
+      });
     } catch (error) {
-      console.error(error);
-      res.status(500).json({
-        error: error.message
+      console.error("ERROR MATERIA:", error);
+
+      return res.status(500).json({
+        success: false,
+        message:
+          error.message ||
+          "Error obteniendo calificaciones",
       });
     }
   }
