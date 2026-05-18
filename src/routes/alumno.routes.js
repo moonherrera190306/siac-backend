@@ -1,158 +1,507 @@
 import express from "express";
 import prisma from "../lib/prisma.js";
 import bcrypt from "bcrypt";
+
 import { verifyToken } from "../middleware/auth.middleware.js";
 import { checkRole } from "../middleware/role.middleware.js";
 
 const router = express.Router();
+// ========================================
+// 🕒 HORARIO DEL ALUMNO
+// ========================================
+router.get(
+  "/horario/:alumnoId",
 
-
-// ✅ CREAR ALUMNO
-router.post(
-  "/",
   verifyToken,
-  checkRole(["ADMIN", "SECRETARIA"]),
+
+  checkRole([
+    "ADMIN",
+    "ALUMNO",
+    "DIRECTOR",
+    "SECRETARIA"
+  ]),
+
   async (req, res) => {
+
     try {
-      const { name, email, matricula } = req.body;
 
-      if (!name || !email || !matricula) {
-        return res.status(400).json({ message: "Faltan datos" });
-      }
+      const { alumnoId } =
+        req.params;
 
-      const hashedPassword = await bcrypt.hash("123456", 10);
-
-      const user = await prisma.user.create({
-        data: {
-          name,
-          email,
-          password: hashedPassword,
-          role: "ALUMNO"
-        }
-      });
-
-      const alumno = await prisma.alumno.create({
-        data: {
-          matricula,
-          userId: user.id
-        }
-      });
-
-      res.json(alumno);
-
-    } catch (error) {
-      console.error(error);
-
-      if (error.code === "P2002") {
-        return res.status(400).json({
-          message: "Email o matrícula ya registrada"
+      // 🔒 SEGURIDAD
+      if (
+        req.user.role === "ALUMNO" &&
+        req.user.alumnoId !== alumnoId
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: "No autorizado"
         });
       }
 
-      res.status(500).json({ error: error.message });
+      // 🔍 BUSCAR ALUMNO
+      const alumno =
+        await prisma.alumno.findUnique({
+
+          where: {
+            id: alumnoId
+          },
+
+          include: {
+
+            grupo: {
+
+              include: {
+
+                materias: true
+              }
+            }
+          }
+        });
+
+      if (!alumno) {
+        return res.status(404).json({
+          success: false,
+          message:
+            "Alumno no encontrado"
+        });
+      }
+
+      // 📚 MATERIAS/HORARIO
+      const horario =
+        alumno?.grupo?.materias || [];
+
+      res.json({
+        success: true,
+        data: horario
+      });
+
+    } catch (error) {
+
+      console.error(error);
+
+      res.status(500).json({
+        success: false,
+        message:
+          "Error al obtener horario"
+      });
+
     }
   }
 );
 
+//////////////////////////////////////////////////////////
+// 🔥 CREAR ALUMNO
+//////////////////////////////////////////////////////////
 
-// ✅ OBTENER TODOS LOS ALUMNOS
+router.post(
+  "/",
+  verifyToken,
+
+  checkRole([
+    "ADMIN",
+    "SECRETARIA"
+  ]),
+
+  async (req, res) => {
+    try {
+
+      const {
+        name,
+        email,
+        matricula,
+
+        programaId,
+        carreraId,
+        grupoId,
+
+        telefono,
+        direccion,
+        curp,
+      } = req.body;
+
+      // 🔥 VALIDACIONES
+      if (
+        !name ||
+        !email ||
+        !matricula
+      ) {
+        return res.status(400).json({
+          message:
+            "Nombre, email y matrícula son obligatorios"
+        });
+      }
+
+      // 🔥 verificar email
+      const existingUser =
+        await prisma.user.findUnique({
+          where: { email }
+        });
+
+      if (existingUser) {
+        return res.status(400).json({
+          message:
+            "El correo ya está registrado"
+        });
+      }
+
+      // 🔥 verificar matrícula
+      const existingAlumno =
+        await prisma.alumno.findUnique({
+          where: { matricula }
+        });
+
+      if (existingAlumno) {
+        return res.status(400).json({
+          message:
+            "La matrícula ya existe"
+        });
+      }
+
+      // 🔥 PASSWORD TEMPORAL
+      const tempPassword =
+        "123456";
+
+      const hashedPassword =
+        await bcrypt.hash(
+          tempPassword,
+          10
+        );
+
+      // 🔥 CREAR USER
+      const user =
+        await prisma.user.create({
+          data: {
+            name,
+            email,
+            password:
+              hashedPassword,
+
+            role: "ALUMNO"
+          }
+        });
+
+      // 🔥 CREAR ALUMNO
+      const alumno =
+        await prisma.alumno.create({
+          data: {
+            matricula,
+
+            telefono:
+              telefono || null,
+
+            direccion:
+              direccion || null,
+
+            curp:
+              curp || null,
+
+            userId:
+              user.id,
+
+            grupoId:
+  grupoId &&
+  grupoId.length > 10
+    ? grupoId
+    : null,
+
+programaId:
+  programaId &&
+  programaId.length > 10
+    ? programaId
+    : null,
+
+carreraId:
+  carreraId &&
+  carreraId.length > 10
+    ? carreraId
+    : null,},
+
+          include: {
+            user: true,
+            grupo: true,
+            programa: true,
+            carrera: true,
+          }
+        });
+
+      res.json({
+        message:
+          "Alumno creado correctamente",
+
+        passwordTemporal:
+          tempPassword,
+
+        data: alumno
+      });
+
+    } catch (error) {
+
+      console.error(
+        "ERROR CREAR ALUMNO:",
+        error
+      );
+      res.status(201).json({
+  message: "Alumno creado",
+  data: alumno,
+
+  credenciales: {
+    correo: email,
+    password: passwordTemporal,
+  }
+});
+
+      res.status(500).json({
+        message:
+          "Error al crear alumno",
+
+        error:
+          error.message
+      });
+    }
+  }
+);
+
+//////////////////////////////////////////////////////////
+// 🔥 OBTENER TODOS LOS ALUMNOS
+//////////////////////////////////////////////////////////
+
 router.get(
   "/",
   verifyToken,
-  checkRole(["ADMIN", "SECRETARIA"]),
+
+  checkRole([
+    "ADMIN",
+    "SECRETARIA",
+    "DIRECTOR"
+  ]),
+
   async (req, res) => {
     try {
-      const alumnos = await prisma.alumno.findMany({
-        include: { user: true }
+
+      const alumnos =
+        await prisma.alumno.findMany({
+          include: {
+            user: true,
+            grupo: true,
+            programa: true,
+            carrera: true,
+          },
+
+          orderBy: {
+            createdAt: "desc"
+          }
+        });
+
+      res.json({
+        data: alumnos
       });
 
-      res.json(alumnos);
-
     } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: error.message });
+
+      console.error(
+        "ERROR GET ALUMNOS:",
+        error
+      );
+
+      res.status(500).json({
+        message:
+          "Error al obtener alumnos",
+
+        error:
+          error.message
+      });
     }
   }
 );
 
+//////////////////////////////////////////////////////////
+// 🔥 OBTENER ALUMNO POR ID
+//////////////////////////////////////////////////////////
 
-// ✅ OBTENER UN SOLO ALUMNO
 router.get(
   "/:id",
   verifyToken,
-  checkRole(["ADMIN", "SECRETARIA"]),
+
+  checkRole([
+    "ADMIN",
+    "SECRETARIA",
+    "DIRECTOR",
+    "ALUMNO"
+  ]),
+
   async (req, res) => {
     try {
-      const { id } = req.params;
 
-      const alumno = await prisma.alumno.findUnique({
-        where: { id },
-        include: { user: true }
-      });
+      const { id } =
+        req.params;
+
+      const alumno =
+        await prisma.alumno.findUnique({
+          where: { id },
+
+          include: {
+            user: true,
+            grupo: true,
+            programa: true,
+            carrera: true,
+          }
+        });
 
       if (!alumno) {
-        return res.status(404).json({ message: "Alumno no encontrado" });
+        return res.status(404).json({
+          message:
+            "Alumno no encontrado"
+        });
       }
 
-      res.json(alumno);
+      res.json({
+        data: alumno
+      });
 
     } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: error.message });
+
+      console.error(
+        "ERROR GET ALUMNO:",
+        error
+      );
+
+      res.status(500).json({
+        message:
+          "Error al obtener alumno",
+
+        error:
+          error.message
+      });
     }
   }
 );
 
+//////////////////////////////////////////////////////////
+// 🔥 ACTUALIZAR ALUMNO
+//////////////////////////////////////////////////////////
 
-// ✏️ ACTUALIZAR ALUMNO
 router.put(
   "/:id",
   verifyToken,
-  checkRole(["ADMIN", "SECRETARIA"]),
+
+  checkRole([
+    "ADMIN",
+    "SECRETARIA",
+    "ALUMNO"
+  ]),
+
   async (req, res) => {
     try {
-      const { id } = req.params;
-      const { name, email, matricula } = req.body;
 
-      const alumno = await prisma.alumno.update({
-        where: { id },
-        data: {
-          matricula,
-          user: {
-            update: {
-              name,
-              email
+      const { id } =
+        req.params;
+
+      const {
+        name,
+        email,
+
+        matricula,
+
+        telefono,
+        direccion,
+        curp,
+
+        grupoId,
+        programaId,
+        carreraId,
+      } = req.body;
+
+      const alumno =
+        await prisma.alumno.update({
+          where: { id },
+
+          data: {
+            matricula,
+
+            telefono,
+            direccion,
+            curp,
+
+            grupoId:
+              grupoId || null,
+
+            programaId:
+              programaId || null,
+
+            carreraId:
+              carreraId || null,
+
+            user: {
+              update: {
+                name,
+                email,
+              }
             }
+          },
+
+          include: {
+            user: true,
+            grupo: true,
+            programa: true,
+            carrera: true,
           }
-        },
-        include: { user: true }
+        });
+
+      res.json({
+        message:
+          "Alumno actualizado correctamente",
+
+        data: alumno
       });
 
-      res.json(alumno);
-
     } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: error.message });
+
+      console.error(
+        "ERROR UPDATE ALUMNO:",
+        error
+      );
+
+      res.status(500).json({
+        message:
+          "Error al actualizar alumno",
+
+        error:
+          error.message
+      });
     }
   }
 );
 
+//////////////////////////////////////////////////////////
+// 🔥 ELIMINAR ALUMNO
+//////////////////////////////////////////////////////////
 
-// 🗑️ ELIMINAR ALUMNO
 router.delete(
   "/:id",
   verifyToken,
-  checkRole(["ADMIN", "SECRETARIA"]),
+
+  checkRole([
+    "ADMIN",
+    "SECRETARIA"
+  ]),
+
   async (req, res) => {
     try {
-      const { id } = req.params;
 
-      const alumno = await prisma.alumno.findUnique({
-        where: { id }
-      });
+      const { id } =
+        req.params;
+
+      const alumno =
+        await prisma.alumno.findUnique({
+          where: { id }
+        });
 
       if (!alumno) {
-        return res.status(404).json({ message: "Alumno no encontrado" });
+        return res.status(404).json({
+          message:
+            "Alumno no encontrado"
+        });
       }
 
       await prisma.alumno.delete({
@@ -160,89 +509,120 @@ router.delete(
       });
 
       await prisma.user.delete({
-        where: { id: alumno.userId }
+        where: {
+          id: alumno.userId
+        }
       });
 
-      res.json({ message: "Alumno eliminado correctamente" });
+      res.json({
+        message:
+          "Alumno eliminado correctamente"
+      });
 
     } catch (error) {
-      console.error(error);
-      res.status(500).json({ error: error.message });
+
+      console.error(
+        "ERROR DELETE ALUMNO:",
+        error
+      );
+
+      res.status(500).json({
+        message:
+          "Error al eliminar alumno",
+
+        error:
+          error.message
+      });
     }
   }
 );
 
-
 //////////////////////////////////////////////////////////
-// 🔥🔥🔥 ESTA ES LA QUE TE FALTABA (CLAVE)
+// 🔥 MATERIAS DEL ALUMNO
 //////////////////////////////////////////////////////////
 
+// ========================================
 // 📚 MATERIAS DEL ALUMNO
+// ========================================
 router.get(
-  "/materias/:id",
+  "/materias/:alumnoId",
+
   verifyToken,
+
+  checkRole([
+    "ADMIN",
+    "ALUMNO",
+    "DIRECTOR",
+    "SECRETARIA"
+  ]),
+
   async (req, res) => {
+
     try {
-      const { id } = req.params;
 
-      // 🔥 buscar alumno por userId
-      const alumno = await prisma.alumno.findUnique({
-        where: { userId: id }
-      });
+      const { alumnoId } =
+        req.params;
 
-      if (!alumno) {
-        return res.status(404).json({
-          message: "Alumno no encontrado"
+      // 🔒 SEGURIDAD
+      if (
+        req.user.role === "ALUMNO" &&
+        req.user.alumnoId !== alumnoId
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: "No autorizado"
         });
       }
 
-      // 🔥 materias del grupo
-      const materias = await prisma.materia.findMany({
-        where: {
-          grupoId: alumno.grupoId
-        },
-        include: {
-          docente: {
-            include: {
-              user: true
+      // 🔍 BUSCAR ALUMNO
+      const alumno =
+        await prisma.alumno.findUnique({
+
+          where: {
+            id: alumnoId
+          },
+
+          include: {
+
+            grupo: {
+
+              include: {
+
+                materias: true
+              }
             }
           }
-        }
+        });
+
+      // ❌ NO EXISTE
+      if (!alumno) {
+        return res.status(404).json({
+          success: false,
+          message:
+            "Alumno no encontrado"
+        });
+      }
+
+      // 📚 MATERIAS
+      const materias =
+        alumno?.grupo?.materias || [];
+
+      // ✅ RESPONSE
+      res.json({
+        success: true,
+        data: materias
       });
-
-      // 🔥 calificaciones
-      const calificaciones = await prisma.calificacion.findMany({
-        where: {
-          alumnoId: alumno.id
-        }
-      });
-
-      // 🔥 combinar todo
-      const resultado = materias.map((m) => {
-        const califs = calificaciones.filter(
-          (c) => c.materiaId === m.id
-        );
-
-        const promedio =
-          califs.length > 0
-            ? califs.reduce((a, b) => a + b.calificacion, 0) /
-              califs.length
-            : 0;
-
-        return {
-          materia: m.nombre,
-          docente: m.docente?.user?.name || "Sin asignar",
-          horario: m.horario || "N/A",
-          aula: m.aula || "N/A",
-          promedio: promedio.toFixed(1),
-        };
-      });
-
-      res.json(resultado);
 
     } catch (error) {
+
       console.error(error);
-      res.status(500).json({ error: error.message });
+
+      res.status(500).json({
+        success: false,
+        message:
+          "Error al obtener materias"
+      });
+
     }
   }
 );

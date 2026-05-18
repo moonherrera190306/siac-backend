@@ -17,7 +17,13 @@ import docenteRoutes from "./routes/docente.routes.js";
 import calificacionRoutes from "./routes/calificacion.routes.js";
 import reportesRoutes from "./routes/reportes.routes.js";
 import directorRoutes from "./routes/director.routes.js";
-import maestroRoutes from "./routes/maestro.routes.js";
+import asistenciaRoutes from "./routes/asistencia.routes.js"
+import documentoRoutes
+from "./routes/documento.routes.js";
+import cicloRoutes
+from "./routes/ciclo.routes.js";
+import asignacionRoutes
+from "./routes/asignacion.routes.js";
 
 dotenv.config();
 
@@ -51,10 +57,22 @@ app.use("/api/docentes", docenteRoutes);
 app.use("/api/calificaciones", calificacionRoutes);
 app.use("/api/reportes", reportesRoutes);
 app.use("/api/director", directorRoutes);
-app.use("/api/maestro", maestroRoutes);
+app.use(
+  "/api/documentos",
+  documentoRoutes
+);
+app.use(
+  "/api/ciclos",
+  cicloRoutes
+);
+app.use(
+  "/api/asignaciones",
+  asignacionRoutes
+);
+
 //app.use("/api/secretaria", secretariaRoutes);
 //app.use("/api/caja", cajaRoutes);
-//app.use("/api/asistencias", asistenciaRoutes);
+app.use("/api/asistencias", asistenciaRoutes);
 
 // 🔥 HEALTH CHECK
 app.get("/", (req, res) => {

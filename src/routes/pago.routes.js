@@ -6,17 +6,21 @@ import { checkRole } from "../middleware/role.middleware.js";
 const router = express.Router();
 
 
+// ==========================================
 // 💰 REGISTRAR PAGO
+// ==========================================
 router.post(
   "/",
   verifyToken,
   checkRole(["ADMIN", "CAJA"]),
   async (req, res) => {
     try {
+
       const { alumnoId, concepto, monto } = req.body;
 
       if (!alumnoId || !concepto || !monto) {
         return res.status(400).json({
+          success: false,
           message: "Datos incompletos"
         });
       }
@@ -26,29 +30,40 @@ router.post(
           alumnoId,
           concepto,
           monto,
-          pagadoEn: new Date() // 🔥 SE REGISTRA COMO PAGADO
+          pagadoEn: new Date()
         }
       });
 
-      res.json(pago);
+      res.status(201).json({
+        success: true,
+        message: "Pago registrado correctamente",
+        data: pago
+      });
 
     } catch (error) {
+
       console.error(error);
+
       res.status(500).json({
+        success: false,
         message: "Error al registrar pago"
       });
+
     }
   }
 );
 
 
-// 🔥 OBTENER TODOS LOS PAGOS (IMPORTANTE QUE VA PRIMERO)
+// ==========================================
+// 🔥 OBTENER TODOS LOS PAGOS
+// ==========================================
 router.get(
   "/",
   verifyToken,
   checkRole(["ADMIN", "CAJA"]),
   async (req, res) => {
     try {
+
       const pagos = await prisma.pago.findMany({
         include: {
           alumno: {
@@ -62,99 +77,182 @@ router.get(
         }
       });
 
-      res.json(pagos);
+      res.json({
+        success: true,
+        data: pagos
+      });
 
     } catch (error) {
+
       console.error(error);
-      res.status(500).json({ error: error.message });
+
+      res.status(500).json({
+        success: false,
+        message: "Error al obtener pagos"
+      });
+
     }
   }
 );
 
 
+// ==========================================
 // 📊 RESUMEN DE PAGOS POR ALUMNO
+// ==========================================
 router.get(
   "/resumen/:alumnoId",
   verifyToken,
-  checkRole(["ADMIN", "CAJA"]),
+  checkRole([
+    "ADMIN",
+    "CAJA",
+    "ALUMNO",
+    "DIRECTOR",
+    "SECRETARIA"
+  ]),
   async (req, res) => {
     try {
+
       const { alumnoId } = req.params;
+
+      // 🔒 SEGURIDAD
+      if (
+        req.user.role === "ALUMNO" &&
+        req.user.alumnoId !== alumnoId
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: "No autorizado"
+        });
+      }
 
       const pagos = await prisma.pago.findMany({
         where: { alumnoId }
       });
 
-      const totalPagado = pagos.reduce((acc, p) => acc + p.monto, 0);
+      const totalPagado = pagos.reduce(
+        (acc, p) => acc + p.monto,
+        0
+      );
 
-      const deudaBase = 1000; // 🔥 luego lo haces dinámico
+      const deudaBase = 1000;
 
       res.json({
-        totalPagado,
-        adeudo: deudaBase - totalPagado
+        success: true,
+        data: {
+          totalPagado,
+          adeudo: deudaBase - totalPagado
+        }
       });
 
     } catch (error) {
+
       console.error(error);
+
       res.status(500).json({
+        success: false,
         message: "Error al obtener resumen"
       });
+
     }
   }
 );
 
 
+// ==========================================
 // 📄 PAGOS POR ALUMNO
+// ==========================================
 router.get(
   "/:alumnoId",
   verifyToken,
-  checkRole(["ADMIN", "CAJA"]),
+  checkRole([
+    "ADMIN",
+    "CAJA",
+    "ALUMNO",
+    "DIRECTOR",
+    "SECRETARIA"
+  ]),
   async (req, res) => {
     try {
+
       const { alumnoId } = req.params;
 
+      // 🔒 SEGURIDAD
+      if (
+        req.user.role === "ALUMNO" &&
+        req.user.alumnoId !== alumnoId
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: "No autorizado"
+        });
+      }
+
       const pagos = await prisma.pago.findMany({
-        where: { alumnoId },
+        where: {
+          alumnoId
+        },
+
         orderBy: {
           pagadoEn: "desc"
         }
       });
 
-      res.json(pagos);
+      res.json({
+        success: true,
+        data: pagos
+      });
 
     } catch (error) {
+
       console.error(error);
+
       res.status(500).json({
+        success: false,
         message: "Error al obtener pagos"
       });
+
     }
   }
 );
 
 
-// 🔥 MARCAR PAGO COMO PAGADO (PARA PENDIENTES)
+// ==========================================
+// 🔥 MARCAR PAGO COMO PAGADO
+// ==========================================
 router.put(
   "/pagar/:id",
   verifyToken,
   checkRole(["ADMIN", "CAJA"]),
   async (req, res) => {
     try {
+
       const { id } = req.params;
 
       const pago = await prisma.pago.update({
-        where: { id },
+        where: {
+          id
+        },
+
         data: {
           pagadoEn: new Date()
         }
       });
 
-      res.json(pago);
+      res.json({
+        success: true,
+        message: "Pago actualizado correctamente",
+        data: pago
+      });
 
     } catch (error) {
+
       console.error(error);
+
       res.status(500).json({
+        success: false,
         message: "Error al actualizar pago"
       });
+
     }
   }
 );

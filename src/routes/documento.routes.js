@@ -1,37 +1,97 @@
 import express from "express";
 import prisma from "../lib/prisma.js";
-import { verifyToken } from "../middleware/auth.middleware.js";
+
+import {
+  verifyToken
+} from "../middleware/auth.middleware.js";
+
+import {
+  checkRole
+} from "../middleware/role.middleware.js";
 
 const router = express.Router();
 
-// 📄 DOCUMENTOS DEL ALUMNO
-router.get("/:userId", verifyToken, async (req, res) => {
-  try {
-    const { userId } = req.params;
 
-    const alumno = await prisma.alumno.findUnique({
-      where: { userId }
-    });
+// ========================================
+// 📄 DOCUMENTOS ALUMNO
+// ========================================
+router.get(
+  "/:alumnoId",
 
-    if (!alumno) {
-      return res.status(404).json({ message: "Alumno no encontrado" });
-    }
+  verifyToken,
 
-    const documentos = await prisma.documento.findMany({
-      where: {
-        alumnoId: alumno.id
-      },
-      orderBy: {
-        createdAt: "desc"
+  checkRole([
+    "ADMIN",
+    "ALUMNO",
+    "DIRECTOR",
+    "SECRETARIA"
+  ]),
+
+  async (req, res) => {
+
+    try {
+
+      const { alumnoId } =
+        req.params;
+
+      // 🔒 SEGURIDAD
+      if (
+        req.user.role === "ALUMNO" &&
+        req.user.alumnoId !== alumnoId
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: "No autorizado"
+        });
       }
-    });
 
-    res.json(documentos);
+      // 🔍 VALIDAR ALUMNO
+      const alumno =
+        await prisma.alumno.findUnique({
+          where: {
+            id: alumnoId
+          }
+        });
 
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: error.message });
+      if (!alumno) {
+        return res.status(404).json({
+          success: false,
+          message:
+            "Alumno no encontrado"
+        });
+      }
+
+      // 📄 DOCUMENTOS
+      const documentos =
+        await prisma.documento.findMany({
+
+          where: {
+            alumnoId
+          },
+
+          orderBy: {
+            createdAt: "desc"
+          }
+        });
+
+      // ✅ RESPONSE
+      res.json({
+        success: true,
+        data: documentos
+      });
+
+    } catch (error) {
+
+      console.error(error);
+
+      res.status(500).json({
+        success: false,
+        message:
+          "Error obteniendo documentos"
+      });
+
+    }
   }
-});
+);
 
 export default router;

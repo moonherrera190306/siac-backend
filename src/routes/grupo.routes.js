@@ -5,71 +5,84 @@ import { checkRole } from "../middleware/role.middleware.js";
 
 const router = express.Router();
 
-
-// 🔥 1. LISTAR TODOS LOS GRUPOS (LO QUE TE FALTA)
 router.get(
   "/",
   verifyToken,
-  checkRole(["ADMIN"]),
+
+  checkRole([
+    "ADMIN",
+    "DIRECTOR",
+    "SECRETARIA",
+    "MAESTRO"
+  ]),
+
   async (req, res) => {
     try {
-      const grupos = await prisma.grupo.findMany({
-        include: {
-          alumnos: true,
-          materias: true
-        }
+
+      const grupos =
+        await prisma.grupo.findMany();
+
+      res.json({
+        data: grupos
       });
 
-      res.json(grupos);
-
     } catch (error) {
-      console.error("Error en GET /grupos", error);
-      res.status(500).json({ message: "Error al obtener grupos" });
+
+      console.error(
+        "ERROR GRUPOS:",
+        error
+      );
+
+      res.status(500).json({
+        message:
+          "Error al obtener grupos"
+      });
     }
   }
 );
 
-
-// 🔥 2. OBTENER GRUPO POR ID (YA LO TENÍAS)
 router.get(
   "/:id",
   verifyToken,
+
+  checkRole([
+    "ADMIN",
+    "DIRECTOR",
+    "SECRETARIA",
+    "MAESTRO"
+  ]),
+
   async (req, res) => {
     try {
-      const { id } = req.params;
 
-      const grupo = await prisma.grupo.findUnique({
-        where: { id },
-        include: {
-          alumnos: {
-            include: {
-              user: true
-            }
-          },
-          materias: {
-            include: {
-              docente: {
-                include: {
-                  user: true
-                }
-              }
-            }
+      const grupo =
+        await prisma.grupo.findUnique({
+          where: {
+            id: req.params.id
           }
-        }
-      });
+        });
 
       if (!grupo) {
         return res.status(404).json({
-          message: "Grupo no encontrado"
+          message:
+            "Grupo no encontrado"
         });
       }
 
-      res.json(grupo);
+      res.json({
+        data: grupo
+      });
 
     } catch (error) {
-      console.error("Error en GET /grupos/:id", error);
+
+      console.error(
+        "ERROR GRUPO:",
+        error
+      );
+
       res.status(500).json({
-        message: "Error al obtener grupo"
+        message:
+          "Error al obtener grupo"
       });
     }
   }

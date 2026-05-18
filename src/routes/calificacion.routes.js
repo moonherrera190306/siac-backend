@@ -120,50 +120,88 @@ router.post(
 /* =========================================
    👨‍🎓 CALIFICACIONES POR ALUMNO
 ========================================= */
+// ========================================
+// 📚 CALIFICACIONES ALUMNO
+// ========================================
 router.get(
-  "/alumno/:id",
-  verifyToken,
-  async (req, res) => {
-    try {
-      const { id } = req.params;
+  "/alumno/:alumnoId",
 
-      const alumno = await prisma.alumno.findUnique({
-        where: {
-          userId: id,
-        },
-      });
+  verifyToken,
+
+  checkRole([
+    "ADMIN",
+    "ALUMNO",
+    "DIRECTOR",
+    "SECRETARIA"
+  ]),
+
+  async (req, res) => {
+
+    try {
+
+      const { alumnoId } =
+        req.params;
+
+      // 🔒 SEGURIDAD
+      if (
+        req.user.role === "ALUMNO" &&
+        req.user.alumnoId !== alumnoId
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: "No autorizado"
+        });
+      }
+
+      // 🔍 VALIDAR ALUMNO
+      const alumno =
+        await prisma.alumno.findUnique({
+          where: {
+            id: alumnoId
+          }
+        });
 
       if (!alumno) {
         return res.status(404).json({
           success: false,
-          message: "Alumno no encontrado",
+          message:
+            "Alumno no encontrado"
         });
       }
 
-      const data = await prisma.calificacion.findMany({
-        where: {
-          alumnoId: alumno.id,
-        },
-        include: {
-          materia: true,
-        },
-        orderBy: {
-          createdAt: "desc",
-        },
+      // 📚 CALIFICACIONES
+      const calificaciones =
+        await prisma.calificacion.findMany({
+
+          where: {
+            alumnoId
+          },
+
+          include: {
+            materia: true
+          },
+
+          orderBy: {
+            createdAt: "desc"
+          }
+        });
+
+      // ✅ RESPONSE
+      res.json({
+        success: true,
+        data: calificaciones
       });
 
-      return res.status(200).json({
-        success: true,
-        data,
-      });
     } catch (error) {
+
       console.error(error);
 
-      return res.status(500).json({
+      res.status(500).json({
         success: false,
         message:
-          "Error obteniendo calificaciones",
+          "Error al obtener calificaciones"
       });
+
     }
   }
 );

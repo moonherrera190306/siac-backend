@@ -7,235 +7,368 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/* =========================================
-   👤 USUARIOS
-========================================= */
+/**
+ * =========================================
+ * 👤 USUARIOS
+ * =========================================
+ */
 
 model User {
-  id        String   @id @default(uuid())
-  name      String
-  email     String   @unique
-  password  String
-  role      Role
+  id       String @id @default(uuid())
+  name     String
+  email    String @unique
+  password String
+  role     Role
 
-  activo    Boolean  @default(true)
+  activo Boolean @default(true)
 
   debeCambiarPassword Boolean @default(true)
 
   createdAt DateTime @default(now())
 
-  alumno    Alumno?
-  docente   Docente?
+  alumno  Alumno?
+  docente Docente?
 }
 
-/* =========================================
-   👨‍🎓 ALUMNOS
-========================================= */
+/**
+ * =========================================
+ * 👨‍🎓 ALUMNOS
+ * =========================================
+ */
 
 model Alumno {
-  id             String           @id @default(uuid())
-  matricula      String           @unique
-  userId         String           @unique
+  id String @id @default(uuid())
 
-  grupoId        String?
+  matricula String @unique
 
-  createdAt      DateTime         @default(now())
+  telefono  String?
+  direccion String?
+  curp      String?
 
-  user           User             @relation(fields: [userId], references: [id])
-  grupo          Grupo?           @relation(fields: [grupoId], references: [id])
+  fechaNacimiento DateTime?
+
+  foto String?
+
+  activo Boolean @default(true)
+
+  //////////////////////////////////////////////////
+  // 🔥 USER
+  //////////////////////////////////////////////////
+
+  userId String @unique
+
+  user User @relation(fields: [userId], references: [id])
+
+  //////////////////////////////////////////////////
+  // 🔥 RELACIONES ACADÉMICAS
+  //////////////////////////////////////////////////
+
+  grupoId String?
+
+  grupo Grupo? @relation(fields: [grupoId], references: [id])
+
+  programaId String?
+
+  programa Programa? @relation(fields: [programaId], references: [id])
+
+  carreraId String?
+
+  carrera Carrera? @relation(fields: [carreraId], references: [id])
+
+  //////////////////////////////////////////////////
+  // 🔥 PERFIL
+  //////////////////////////////////////////////////
+
+  sexo String?
+
+  ciudad       String?
+  estado       String?
+  codigoPostal String?
+
+  tutorNombre   String?
+  tutorTelefono String?
+
+  estatusAcademico String? @default("ACTIVO")
+
+  //////////////////////////////////////////////////
+  // 🔥 RELACIONES IMPORTANTES
+  //////////////////////////////////////////////////
+
+  pagos Pago[]
+
+  documentos Documento[]
+
+  asistencias Asistencia[]
 
   calificaciones Calificacion[]
-  pagos          Pago[]
-  asistencias    Asistencia[]
-  documentos     Documento[]
+
+  //////////////////////////////////////////////////
+  // 🔥 FECHAS
+  //////////////////////////////////////////////////
+
+  createdAt DateTime @default(now())
 }
 
-/* =========================================
-   👨‍🏫 DOCENTES
-========================================= */
+/**
+ * =========================================
+ * 👨‍🏫 DOCENTES
+ * =========================================
+ */
 
 model Docente {
-  id        String      @id @default(uuid())
-  userId    String      @unique
+  id     String @id @default(uuid())
+  userId String @unique
 
-  user      User        @relation(fields: [userId], references: [id])
-
-  materias  Materia[]
+  user User @relation(fields: [userId], references: [id])
+  asignaciones AsignacionMateria[]
 }
 
-/* =========================================
-   📚 PROGRAMAS
-========================================= */
+/**
+ * =========================================
+ * 📚 PROGRAMAS
+ * =========================================
+ */
 
 model Programa {
-  id         String      @id @default(uuid())
-  nombre     String
+  id String @id @default(uuid())
 
-  carreras   Carrera[]
+  nombre String @unique
+
+  carreras Carrera[]
+
+  alumnos Alumno[]
 }
 
-/* =========================================
-   🏫 CARRERAS
-========================================= */
+/**
+ * =========================================
+ * 🏫 CARRERAS
+ * =========================================
+ */
 
 model Carrera {
-  id          String      @id @default(uuid())
-  nombre      String
+  id String @id @default(uuid())
 
-  programaId  String
+  nombre String @unique
 
-  programa    Programa    @relation(fields: [programaId], references: [id])
+  programaId String?
 
-  semestres   Semestre[]
+  programa Programa? @relation(fields: [programaId], references: [id])
+
+  semestres Semestre[]
+
+  alumnos Alumno[]
 }
 
-/* =========================================
-   📖 SEMESTRES
-========================================= */
+/**
+ * =========================================
+ * 📖 SEMESTRES
+ * =========================================
+ */
 
 model Semestre {
-  id          String      @id @default(uuid())
-  nombre      String
+  id     String @id @default(uuid())
+  nombre String
 
-  carreraId   String
+  carreraId String?
 
-  carrera     Carrera     @relation(fields: [carreraId], references: [id])
+  carrera Carrera? @relation(fields: [carreraId], references: [id])
 
-  grupos      Grupo[]
+  grupos    Grupo[]
+  createdAt DateTime @default(now())
 }
 
-/* =========================================
-   👥 GRUPOS
-========================================= */
+/**
+ * =========================================
+ * 👥 GRUPOS
+ * =========================================
+ */
 
 model Grupo {
-  id            String         @id @default(uuid())
-  nombre        String
+  id String @id @default(uuid())
 
-  semestreId    String
+  nombre String
 
-  semestre      Semestre       @relation(fields: [semestreId], references: [id])
+  turno String?
+  nivel String?
 
-  alumnos       Alumno[]
-  materias      Materia[]
-  asistencias   Asistencia[]
+  semestreId String?
+
+  semestre Semestre? @relation(fields: [semestreId], references: [id])
+
+  alumnos     Alumno[]
+  asistencias Asistencia[]
+  asignaciones AsignacionMateria[]
+
+  createdAt DateTime @default(now())
 }
 
-/* =========================================
-   📘 MATERIAS
-========================================= */
+/**
+ * =========================================
+ * 📘 MATERIAS
+ * =========================================
+ */
 
 model Materia {
-  id               String            @id @default(uuid())
-  nombre           String
 
-  grupoId          String
-  docenteId        String?
+  id String @id @default(uuid())
 
-  grupo            Grupo             @relation(fields: [grupoId], references: [id])
-  docente          Docente?          @relation(fields: [docenteId], references: [id])
+  nombre String
 
-  calificaciones   Calificacion[]
+  descripcion String?
+
+  calificaciones Calificacion[]
+  asignaciones AsignacionMateria[]
+}
+model AsignacionMateria {
+
+  id String @id @default(uuid())
+
+  materiaId String
+  docenteId String
+  grupoId String
+  cicloEscolarId String
+
+  horario String?
+  aula String?
+
+  createdAt DateTime @default(now())
+
+  materia Materia @relation(fields: [materiaId], references: [id])
+
+  docente Docente @relation(fields: [docenteId], references: [id])
+
+  grupo Grupo @relation(fields: [grupoId], references: [id])
+
+  cicloEscolar CicloEscolar @relation(fields: [cicloEscolarId], references: [id])
 }
 
-/* =========================================
-   📝 CALIFICACIONES
-========================================= */
+model CicloEscolar {
+
+  id String @id @default(uuid())
+
+  nombre String @unique
+
+  activo Boolean @default(true)
+
+  fechaInicio DateTime?
+  fechaFin DateTime?
+
+  asignaciones AsignacionMateria[]
+
+  createdAt DateTime @default(now())
+}
+/**
+ * =========================================
+ * 📝 CALIFICACIONES
+ * =========================================
+ */
 
 model Calificacion {
-  id             String       @id @default(uuid())
+  id String @id @default(uuid())
 
-  alumnoId       String
-  materiaId      String
+  alumnoId  String
+  materiaId String
 
-  calificacion   Float
+  calificacion Float
 
-  createdAt      DateTime     @default(now())
+  createdAt DateTime @default(now())
 
-  alumno         Alumno       @relation(fields: [alumnoId], references: [id])
-  materia        Materia      @relation(fields: [materiaId], references: [id])
+  alumno  Alumno  @relation(fields: [alumnoId], references: [id])
+  materia Materia @relation(fields: [materiaId], references: [id])
 
   // 🔥 evita duplicados alumno + materia
   @@unique([alumnoId, materiaId])
 }
 
-/* =========================================
-   📅 ASISTENCIAS
-========================================= */
+/**
+ * =========================================
+ * 📅 ASISTENCIAS
+ * =========================================
+ */
 
 model Asistencia {
-  id          String               @id @default(uuid())
+  id String @id @default(uuid())
 
-  fecha       DateTime             @default(now())
-  estado      EstadoAsistencia
+  fecha  DateTime         @default(now())
+  estado EstadoAsistencia
 
-  alumnoId    String
-  grupoId     String?
+  alumnoId String
+  grupoId  String?
 
-  createdAt   DateTime             @default(now())
+  createdAt DateTime @default(now())
 
-  alumno      Alumno               @relation(fields: [alumnoId], references: [id])
-  grupo       Grupo?               @relation(fields: [grupoId], references: [id])
+  alumno Alumno @relation(fields: [alumnoId], references: [id])
+  grupo  Grupo? @relation(fields: [grupoId], references: [id])
 
   // 🔥 evita asistencia duplicada mismo día
   @@unique([alumnoId, fecha])
 }
 
-/* =========================================
-   📄 DOCUMENTOS
-========================================= */
+/**
+ * =========================================
+ * 📄 DOCUMENTOS
+ * =========================================
+ */
 
 model Documento {
-  id          String        @id @default(uuid())
+  id String @id @default(uuid())
 
-  nombre      String
-  tipo        String
-  url         String
+  nombre String
+  tipo   String
+  url    String
 
-  alumnoId    String
+  estado String @default("Pendiente")
 
-  createdAt   DateTime      @default(now())
+  alumnoId String
 
-  alumno      Alumno        @relation(fields: [alumnoId], references: [id])
+  createdAt DateTime @default(now())
+
+  alumno Alumno @relation(fields: [alumnoId], references: [id])
 }
 
-/* =========================================
-   💰 CUOTAS
-========================================= */
+/**
+ * =========================================
+ * 💰 CUOTAS
+ * =========================================
+ */
 
 model Cuota {
-  id          String      @id @default(uuid())
+  id String @id @default(uuid())
 
-  nombre      String
-  monto       Float
+  nombre String
+  monto  Float
 
-  createdAt   DateTime    @default(now())
+  createdAt DateTime @default(now())
 
-  pagos       Pago[]
+  pagos Pago[]
 }
 
-/* =========================================
-   💳 PAGOS
-========================================= */
+/**
+ * =========================================
+ * 💳 PAGOS
+ * =========================================
+ */
 
 model Pago {
-  id          String      @id @default(uuid())
+  id String @id @default(uuid())
 
-  alumnoId    String
-  cuotaId     String?
+  alumnoId String
+  cuotaId  String?
 
-  concepto    String
-  monto       Float
+  concepto String
+  monto    Float
 
-  pagadoEn    DateTime    @default(now())
+  pagadoEn DateTime?
 
-  alumno      Alumno      @relation(fields: [alumnoId], references: [id])
-  cuota       Cuota?      @relation(fields: [cuotaId], references: [id])
+  alumno Alumno @relation(fields: [alumnoId], references: [id])
+  cuota  Cuota? @relation(fields: [cuotaId], references: [id])
 }
 
-/* =========================================
-   🎭 ROLES
-========================================= */
+/**
+ * =========================================
+ * 🎭 ROLES
+ * =========================================
+ */
 
 enum Role {
   ADMIN
@@ -246,9 +379,11 @@ enum Role {
   SECRETARIA
 }
 
-/* =========================================
-   📌 ESTADOS ASISTENCIA
-========================================= */
+/**
+ * =========================================
+ * 📌 ESTADOS ASISTENCIA
+ * =========================================
+ */
 
 enum EstadoAsistencia {
   PRESENTE
