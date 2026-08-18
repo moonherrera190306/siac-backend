@@ -5,7 +5,8 @@
   "main": "src/server.js",
   "scripts": {
     "dev": "nodemon src/server.js",
-    "start": "node src/server.js",
+    "postinstall": "prisma generate",
+    "start": "prisma migrate deploy && node src/server.js",
     "users:list": "node src/scripts/listUsers.js",
     "users:create": "node src/scripts/createUsers.js",
     "users:reset": "node src/scripts/resetPassword.js",
