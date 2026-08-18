@@ -9,6 +9,139 @@ datasource db {
 
 /**
  * =========================================
+ * 🎭 ENUMS
+ * =========================================
+ */
+
+enum Role {
+  ADMIN
+  ALUMNO
+  CAJA
+  DIRECTOR
+  MAESTRO
+  SECRETARIA
+}
+
+enum EstatusInscripcion {
+  ACTIVA
+  BAJA
+  CONCLUIDA
+}
+
+enum EstatusAcademico {
+  ACTIVO
+  BAJA_TEMPORAL
+  BAJA_DEFINITIVA
+  EGRESADO
+}
+
+// Cómo se evalúa una materia. Define qué valores acepta el kardex.
+enum TipoEvaluacion {
+  NUMERICA // 1-10
+  ACREDITACION // AC / NA
+}
+
+// Unifica las 3 tablas legadas MATERIA / MAT_COMPLEMENTARIA / EXTRACURRICULAR.
+enum TipoMateria {
+  OBLIGATORIA
+  COMPLEMENTARIA
+  EXTRACURRICULAR
+}
+
+// Columnas capturables del kardex. Bloqueo controla cuáles están abiertas.
+enum ColumnaKardex {
+  PP // primer parcial
+  SP // segundo parcial
+  PROM // promedio
+  EF // examen final
+  O // ordinario / nota final
+  EE // extraordinario
+  EA // adicional
+  EER // especial
+  ND // nota definitiva
+}
+
+enum EstatusCalificacion {
+  EN_CURSO
+  APROBADA
+  REPROBADA
+  NO_PRESENTO
+}
+
+enum EstadoAsistencia {
+  PRESENTE
+  FALTA
+  RETARDO
+  JUSTIFICADO
+}
+
+enum DiaSemana {
+  LUNES
+  MARTES
+  MIERCOLES
+  JUEVES
+  VIERNES
+  SABADO
+}
+
+enum EstadoDocumento {
+  PENDIENTE
+  VALIDADO
+  RECHAZADO
+}
+
+enum MetodoPago {
+  EFECTIVO
+  TRANSFERENCIA
+  TARJETA
+  DEPOSITO
+}
+
+enum EstadoPago {
+  PAGADO
+  CANCELADO
+}
+
+enum EstadoTramite {
+  SOLICITADO
+  EN_PROCESO
+  LISTO
+  ENTREGADO
+  CANCELADO
+}
+
+enum TipoObservacion {
+  ACADEMICA
+  CONDUCTA
+  ASISTENCIA
+  ADMINISTRATIVA
+  RECONOCIMIENTO
+  OTRA
+}
+
+enum GravedadObservacion {
+  BAJA
+  MEDIA
+  ALTA
+}
+
+enum EstatusObservacion {
+  ABIERTA
+  EN_SEGUIMIENTO
+  RESUELTA
+  CERRADA
+}
+
+enum AccionAudit {
+  CREAR
+  ACTUALIZAR
+  ELIMINAR
+  CANCELAR
+  LOGIN
+}
+
+/**
+ * =========================================
  * 👤 USUARIOS
  * =========================================
  */
@@ -24,10 +157,16 @@ model User {
 
   debeCambiarPassword Boolean @default(true)
 
-  createdAt DateTime @default(now())
+  ultimoAcceso DateTime?
 
-  alumno  Alumno?
-  docente Docente?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  alumno    Alumno?
+  docente   Docente?
+  auditoria AuditLog[]
+
+  @@index([role])
 }
 
 /**
@@ -39,7 +178,9 @@ model User {
 model Alumno {
   id String @id @default(uuid())
 
-  matricula String @unique
+  // 🔥 Llave natural para la migración desde el sistema anterior.
+  matricula String  @unique
+  legacyId  String? @unique
 
   telefono  String?
   direccion String?
@@ -75,6 +216,11 @@ model Alumno {
 
   carrera Carrera? @relation(fields: [carreraId], references: [id])
 
+  // Trayectoria / área propedéutica UMSNH (solo preparatoria).
+  trayectoriaId String?
+
+  trayectoria Trayectoria? @relation(fields: [trayectoriaId], references: [id])
+
   //////////////////////////////////////////////////
   // 🔥 PERFIL
   //////////////////////////////////////////////////
@@ -88,25 +234,37 @@ model Alumno {
   tutorNombre   String?
   tutorTelefono String?
 
-  estatusAcademico String? @default("ACTIVO")
+  estatusAcademico EstatusAcademico @default(ACTIVO)
+
+  // Baja lógica: nunca se borra un alumno.
+  fechaBaja  DateTime?
+  motivoBaja String?
 
   //////////////////////////////////////////////////
   // 🔥 RELACIONES IMPORTANTES
   //////////////////////////////////////////////////
 
-  pagos Pago[]
-
-  documentos Documento[]
-
-  asistencias Asistencia[]
-
-  calificaciones Calificacion[]
+  inscripciones     Inscripcion[]
+  observaciones     Observacion[]
+  pagos             Pago[]
+  documentos        Documento[]
+  calificaciones    Calificacion[]
+  adeudos           Adeudo[]
+  tramites          Tramite[]
+  asistenciasClase  AsistenciaClase[]
+  asistenciaMensual AsistenciaMensual[]
 
   //////////////////////////////////////////////////
   // 🔥 FECHAS
   //////////////////////////////////////////////////
 
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([grupoId])
+  @@index([programaId])
+  @@index([carreraId])
+  @@index([estatusAcademico])
 }
 
 /**
@@ -116,90 +274,181 @@ model Alumno {
  */
 
 model Docente {
-  id     String @id @default(uuid())
+  id String @id @default(uuid())
+
+  legacyId String? @unique
+
+  // 🔥 Datos propios: sin ellos no se pueden emitir actas ni reportes oficiales.
+  nombre   String?
+  cedula   String?
+  rfc      String?
+  telefono String?
+
+  activo Boolean @default(true)
+
   userId String @unique
 
   user User @relation(fields: [userId], references: [id])
-  asignaciones AsignacionMateria[]
+
+  asignaciones  AsignacionMateria[]
+  observaciones Observacion[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 /**
  * =========================================
- * 📚 PROGRAMAS
+ * 🏛️ ESTRUCTURA ACADÉMICA
+ * CicloEscolar → NivelAcademico → Turno → Programa → Semestre → Grupo
  * =========================================
  */
+
+model NivelAcademico {
+  id String @id @default(uuid())
+
+  legacyId String? @unique
+
+  // PREPARATORIA / UNIVERSIDAD (jerarquía legada)
+  clave  String @unique
+  nombre String
+
+  programas    Programa[]
+  trayectorias Trayectoria[]
+
+  createdAt DateTime @default(now())
+}
+
+model Turno {
+  id String @id @default(uuid())
+
+  legacyId String? @unique
+
+  clave  String @unique // MAT / VES
+  nombre String
+
+  grupos Grupo[]
+
+  createdAt DateTime @default(now())
+}
 
 model Programa {
   id String @id @default(uuid())
 
+  legacyId String? @unique
+
   nombre String @unique
 
+  nivelAcademicoId String
+
+  nivelAcademico NivelAcademico @relation(fields: [nivelAcademicoId], references: [id])
+
   carreras Carrera[]
+  alumnos  Alumno[]
 
-  alumnos Alumno[]
+  createdAt DateTime @default(now())
+
+  @@index([nivelAcademicoId])
 }
-
-/**
- * =========================================
- * 🏫 CARRERAS
- * =========================================
- */
 
 model Carrera {
   id String @id @default(uuid())
 
+  legacyId String? @unique
+
   nombre String @unique
+
+  // Universidad: 6 a 10 según la carrera. Preparatoria: 6 fijo.
+  totalSemestres Int
 
   programaId String?
 
   programa Programa? @relation(fields: [programaId], references: [id])
 
   semestres Semestre[]
+  alumnos   Alumno[]
 
-  alumnos Alumno[]
+  createdAt DateTime @default(now())
+
+  @@index([programaId])
 }
 
-/**
- * =========================================
- * 📖 SEMESTRES
- * =========================================
- */
+// Trayectorias / áreas propedéuticas UMSNH (claves 321, 331, 341, 351).
+model Trayectoria {
+  id String @id @default(uuid())
+
+  legacyId String? @unique
+
+  clave   String  @unique // 321, 331, 341, 351
+  nombre  String
+  seccion String? // sección oficial 01-14
+
+  // 🔥 Las trayectorias son de preparatoria (UMSNH). El nivel define
+  // dónde se ofrecen y permite ocultarlas en universidad.
+  nivelAcademicoId String?
+
+  nivelAcademico NivelAcademico? @relation(fields: [nivelAcademicoId], references: [id])
+
+  alumnos  Alumno[]
+  materias Materia[]
+
+  createdAt DateTime @default(now())
+
+  @@index([nivelAcademicoId])
+}
 
 model Semestre {
-  id     String @id @default(uuid())
+  id String @id @default(uuid())
+
+  legacyId String? @unique
+
   nombre String
+
+  // 1..10 — permite ordenar y validar avance.
+  numero Int?
 
   carreraId String?
 
   carrera Carrera? @relation(fields: [carreraId], references: [id])
 
-  grupos    Grupo[]
-  createdAt DateTime @default(now())
-}
+  grupos   Grupo[]
+  materias Materia[]
 
-/**
- * =========================================
- * 👥 GRUPOS
- * =========================================
- */
+  createdAt DateTime @default(now())
+
+  @@index([carreraId])
+}
 
 model Grupo {
   id String @id @default(uuid())
 
+  legacyId String? @unique
+
   nombre String
 
-  turno String?
-  nivel String?
+  // Antes `turno` y `nivel` eran String sueltos: dos fuentes de verdad.
+  turnoId String?
+
+  turno Turno? @relation(fields: [turnoId], references: [id])
 
   semestreId String?
 
   semestre Semestre? @relation(fields: [semestreId], references: [id])
 
-  alumnos     Alumno[]
-  asistencias Asistencia[]
-  asignaciones AsignacionMateria[]
+  cupo Int?
+
+  activo Boolean @default(true)
+
+  alumnos       Alumno[]
+  asignaciones  AsignacionMateria[]
+  inscripciones Inscripcion[]
+  observaciones Observacion[]
 
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([semestreId])
+  @@index([turnoId])
 }
 
 /**
@@ -209,29 +458,59 @@ model Grupo {
  */
 
 model Materia {
-
   id String @id @default(uuid())
+
+  legacyId String? @unique
+
+  // CVE del plan de estudios (100155, 100281, …).
+  clave String? @unique
 
   nombre String
 
   descripcion String?
 
-  calificaciones Calificacion[]
-  asignaciones AsignacionMateria[]
-}
-model AsignacionMateria {
+  tipo TipoMateria @default(OBLIGATORIA)
 
+  tipoEvaluacion TipoEvaluacion @default(NUMERICA)
+
+  creditos    Int?
+  horasSemana Int?
+
+  semestreId String?
+
+  semestre Semestre? @relation(fields: [semestreId], references: [id])
+
+  trayectoriaId String?
+
+  trayectoria Trayectoria? @relation(fields: [trayectoriaId], references: [id])
+
+  activo Boolean @default(true)
+
+  calificaciones    Calificacion[]
+  asignaciones      AsignacionMateria[]
+  asistenciaMensual AsistenciaMensual[]
+  observaciones     Observacion[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([semestreId])
+  @@index([trayectoriaId])
+  @@index([tipo])
+}
+
+model AsignacionMateria {
   id String @id @default(uuid())
 
-  materiaId String
-  docenteId String
-  grupoId String
+  materiaId      String
+  docenteId      String
+  grupoId        String
   cicloEscolarId String
 
-  horario String?
   aula String?
 
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   materia Materia @relation(fields: [materiaId], references: [id])
 
@@ -240,68 +519,311 @@ model AsignacionMateria {
   grupo Grupo @relation(fields: [grupoId], references: [id])
 
   cicloEscolar CicloEscolar @relation(fields: [cicloEscolarId], references: [id])
+
+  // El horario dejó de ser un String suelto: ahora es una relación.
+  horarios Horario[]
+  clases   Clase[]
+
+  // 🔥 un grupo no puede tener la misma materia asignada dos veces en el mismo ciclo,
+  // sin importar el docente
+  @@unique([materiaId, grupoId, cicloEscolarId])
+  @@index([docenteId])
+  @@index([grupoId])
+  @@index([cicloEscolarId])
 }
 
 model CicloEscolar {
-
   id String @id @default(uuid())
+
+  legacyId String? @unique
 
   nombre String @unique
 
   activo Boolean @default(true)
 
   fechaInicio DateTime?
-  fechaFin DateTime?
+  fechaFin    DateTime?
 
-  asignaciones AsignacionMateria[]
+  asignaciones      AsignacionMateria[]
+  calificaciones    Calificacion[]
+  inscripciones     Inscripcion[]
+  bloqueos          Bloqueo[]
+  adeudos           Adeudo[]
+  asistenciaMensual AsistenciaMensual[]
 
   createdAt DateTime @default(now())
+
+  @@index([activo])
 }
+
 /**
  * =========================================
- * 📝 CALIFICACIONES
+ * 📋 INSCRIPCIONES
+ * =========================================
+ *
+ * `Alumno.grupoId` sigue siendo el grupo VIGENTE (consulta directa,
+ * sin join, para asistencia y listas). Inscripcion guarda el HISTORIAL:
+ * en qué grupo estuvo el alumno en cada ciclo.
+ *
+ * Los dos se escriben SIEMPRE en la misma transacción.
+ */
+
+model Inscripcion {
+  id String @id @default(uuid())
+
+  legacyId String? @unique
+
+  alumnoId       String
+  cicloEscolarId String
+  grupoId        String?
+
+  alumno       Alumno       @relation(fields: [alumnoId], references: [id])
+  cicloEscolar CicloEscolar @relation(fields: [cicloEscolarId], references: [id])
+  grupo        Grupo?       @relation(fields: [grupoId], references: [id])
+
+  // Semestre que cursa en esa inscripción (1..10).
+  semestreNumero Int?
+
+  estatus EstatusInscripcion @default(ACTIVA)
+
+  fechaInscripcion DateTime @default(now())
+  fechaBaja        DateTime?
+  motivoBaja       String?
+
+  observaciones String?
+
+  createdById String?
+  updatedById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // 🔥 Un alumno solo se inscribe una vez por ciclo.
+  @@unique([alumnoId, cicloEscolarId])
+  @@index([cicloEscolarId])
+  @@index([grupoId])
+  @@index([estatus])
+}
+
+/**
+ * =========================================
+ * 🕐 HORARIOS Y CLASES
+ * Horario = lo programado. Clase = lo que realmente ocurrió.
+ * =========================================
+ */
+
+model Horario {
+  id String @id @default(uuid())
+
+  asignacionId String
+
+  asignacion AsignacionMateria @relation(fields: [asignacionId], references: [id], onDelete: Cascade)
+
+  dia DiaSemana
+
+  horaInicio String // "07:00"
+  horaFin    String // "08:00"
+
+  aula String?
+
+  clases Clase[]
+
+  createdAt DateTime @default(now())
+
+  @@unique([asignacionId, dia, horaInicio])
+  @@index([asignacionId])
+  @@index([dia])
+}
+
+// Una sesión concreta. `registrada = false` da el reporte
+// "clases programadas vs. clases impartidas".
+model Clase {
+  id String @id @default(uuid())
+
+  asignacionId String
+
+  asignacion AsignacionMateria @relation(fields: [asignacionId], references: [id])
+
+  horarioId String?
+
+  horario Horario? @relation(fields: [horarioId], references: [id])
+
+  fecha DateTime
+
+  registrada   Boolean   @default(false)
+  registradaEn DateTime?
+
+  //////////////////////////////////////////////////
+  // 🔥 BITÁCORA DOCENTE
+  //////////////////////////////////////////////////
+
+  tema          String?
+  actividad     String?
+  observaciones String?
+  incidencias   String?
+  evidenciaUrl  String?
+
+  asistencias AsistenciaClase[]
+
+  // ⚠️ El campo `observaciones` de arriba es el texto de la bitácora.
+  // Esta relación son las observaciones formales del módulo de
+  // seguimiento, por eso lleva otro nombre.
+  observacionesRegistradas Observacion[]
+
+  createdById String?
+  updatedById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([asignacionId, fecha, horarioId])
+  @@index([asignacionId])
+  @@index([fecha])
+  @@index([registrada])
+}
+
+/**
+ * =========================================
+ * 📅 ASISTENCIA
+ * Diaria (nueva) alimenta el acumulado mensual (legado).
+ * =========================================
+ */
+
+model AsistenciaClase {
+  id String @id @default(uuid())
+
+  claseId  String
+  alumnoId String
+
+  clase  Clase  @relation(fields: [claseId], references: [id], onDelete: Cascade)
+  alumno Alumno @relation(fields: [alumnoId], references: [id])
+
+  estado EstadoAsistencia
+
+  observacion String?
+
+  createdById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // 🔥 Ahora sí evita duplicados: una asistencia por alumno por clase.
+  @@unique([claseId, alumnoId])
+  @@index([alumnoId])
+}
+
+// Formato del sistema anterior: acumulado por mes y por materia.
+model AsistenciaMensual {
+  id String @id @default(uuid())
+
+  legacyId String? @unique
+
+  alumnoId       String
+  materiaId      String
+  cicloEscolarId String
+
+  alumno       Alumno       @relation(fields: [alumnoId], references: [id])
+  materia      Materia      @relation(fields: [materiaId], references: [id])
+  cicloEscolar CicloEscolar @relation(fields: [cicloEscolarId], references: [id])
+
+  asisMes1 Int @default(0)
+  asisMes2 Int @default(0)
+  asisMes3 Int @default(0)
+  asisMes4 Int @default(0)
+
+  faltasMes1 Int @default(0)
+  faltasMes2 Int @default(0)
+  faltasMes3 Int @default(0)
+  faltasMes4 Int @default(0)
+
+  porcentaje Float?
+
+  migrado Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([alumnoId, materiaId, cicloEscolarId])
+  @@index([materiaId])
+  @@index([cicloEscolarId])
+}
+
+/**
+ * =========================================
+ * 📝 CALIFICACIONES — estructura del kardex oficial
+ * Todos los valores son texto: aceptan 1-10, AC, NA, NP.
  * =========================================
  */
 
 model Calificacion {
   id String @id @default(uuid())
 
-  alumnoId  String
-  materiaId String
+  legacyId String? @unique
 
-  calificacion Float
+  alumnoId       String
+  materiaId      String
+  cicloEscolarId String
+
+  alumno       Alumno       @relation(fields: [alumnoId], references: [id])
+  materia      Materia      @relation(fields: [materiaId], references: [id])
+  cicloEscolar CicloEscolar @relation(fields: [cicloEscolarId], references: [id])
+
+  //////////////////////////////////////////////////
+  // 🔥 COLUMNAS DEL KARDEX
+  //////////////////////////////////////////////////
+
+  primerParcial  String? @db.VarChar(4) // PP
+  segundoParcial String? @db.VarChar(4) // SP
+  promedio       String? @db.VarChar(4) // PROM
+  examenFinal    String? @db.VarChar(4) // EF
+  notaFinal      String? @db.VarChar(4) // O  (ordinario)
+  extraordinario String? @db.VarChar(4) // EE
+  adicional      String? @db.VarChar(4) // EA
+  especial       String? @db.VarChar(4) // EER
+  articulo       String? @db.VarChar(8) // Artículo
+  notaDefinitiva String? @db.VarChar(4) // ND
+
+  estatus EstatusCalificacion @default(EN_CURSO)
+
+  // 🔥 Los registros migrados NUNCA se recalculan (el .5 sube solo en capturas nuevas).
+  migrado Boolean @default(false)
+
+  createdById String?
+  updatedById String?
 
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  alumno  Alumno  @relation(fields: [alumnoId], references: [id])
-  materia Materia @relation(fields: [materiaId], references: [id])
-
-  // 🔥 evita duplicados alumno + materia
-  @@unique([alumnoId, materiaId])
+  // 🔥 permite historial: mismo alumno+materia en distintos ciclos = recursamiento
+  @@unique([alumnoId, materiaId, cicloEscolarId])
+  @@index([materiaId])
+  @@index([cicloEscolarId])
+  @@index([estatus])
 }
 
-/**
- * =========================================
- * 📅 ASISTENCIAS
- * =========================================
- */
-
-model Asistencia {
+// Reemplaza la idea de "periodo abierto": define qué columna del kardex
+// puede capturar el docente y en qué fechas.
+model Bloqueo {
   id String @id @default(uuid())
 
-  fecha  DateTime         @default(now())
-  estado EstadoAsistencia
+  cicloEscolarId String
 
-  alumnoId String
-  grupoId  String?
+  cicloEscolar CicloEscolar @relation(fields: [cicloEscolarId], references: [id])
+
+  columna ColumnaKardex
+
+  abierto Boolean @default(false)
+
+  fechaApertura DateTime?
+  fechaCierre   DateTime?
+
+  createdById String?
+  updatedById String?
 
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  alumno Alumno @relation(fields: [alumnoId], references: [id])
-  grupo  Grupo? @relation(fields: [grupoId], references: [id])
-
-  // 🔥 evita asistencia duplicada mismo día
-  @@unique([alumnoId, fecha])
+  @@unique([cicloEscolarId, columna])
 }
 
 /**
@@ -317,76 +839,305 @@ model Documento {
   tipo   String
   url    String
 
-  estado String @default("Pendiente")
+  mime   String?
+  tamano Int?
+
+  estado EstadoDocumento @default(PENDIENTE)
+
+  motivoRechazo String?
+
+  validadoPorId String?
+  validadoEn    DateTime?
 
   alumnoId String
 
-  createdAt DateTime @default(now())
-
   alumno Alumno @relation(fields: [alumnoId], references: [id])
+
+  createdById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([alumnoId])
+  @@index([estado])
 }
 
 /**
  * =========================================
- * 💰 CUOTAS
+ * 💰 CAJA
+ * Pago = encabezado del recibo (lleva el folio). DetallePago = sus líneas.
  * =========================================
  */
 
-model Cuota {
+model ConceptoPago {
   id String @id @default(uuid())
 
+  legacyId String? @unique
+
+  clave  String @unique // INSCRIPCION / CONSTANCIA / MEMORANDUM / OTROS
   nombre String
-  monto  Float
+
+  monto Float?
+
+  // 🔥 Puente caja → secretaría: al cobrarlo se crea un Trámite
+  // en la misma transacción.
+  generaTramite Boolean @default(false)
+
+  activo Boolean @default(true)
+
+  detalles DetallePago[]
+  adeudos  Adeudo[]
+  tramites Tramite[]
 
   createdAt DateTime @default(now())
-
-  pagos Pago[]
+  updatedAt DateTime @updatedAt
 }
-
-/**
- * =========================================
- * 💳 PAGOS
- * =========================================
- */
 
 model Pago {
   id String @id @default(uuid())
 
+  // 🔥 Folio del recibo. Continúa la serie física:
+  // ALTER SEQUENCE "Pago_folio_seq" RESTART WITH 100053;
+  folio Int @unique @default(autoincrement())
+
   alumnoId String
-  cuotaId  String?
-
-  concepto String
-  monto    Float
-
-  pagadoEn DateTime?
 
   alumno Alumno @relation(fields: [alumnoId], references: [id])
-  cuota  Cuota? @relation(fields: [cuotaId], references: [id])
+
+  total Float
+
+  metodo MetodoPago @default(EFECTIVO)
+
+  referencia String?
+
+  estado EstadoPago @default(PAGADO)
+
+  pagadoEn DateTime @default(now())
+
+  // 🔥 Un pago nunca se borra: se cancela.
+  canceladoEn   DateTime?
+  canceladoPorId String?
+  motivoCancela String?
+
+  // Quién cobró — necesario para el corte de caja por cajero.
+  cobradoPorId String?
+
+  detalles DetallePago[]
+  tramites Tramite[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([alumnoId])
+  @@index([pagadoEn])
+  @@index([estado])
+  @@index([cobradoPorId])
+}
+
+// Líneas del recibo. Sustituye al modelo Cuota.
+model DetallePago {
+  id String @id @default(uuid())
+
+  pagoId String
+
+  pago Pago @relation(fields: [pagoId], references: [id], onDelete: Cascade)
+
+  conceptoPagoId String
+
+  concepto ConceptoPago @relation(fields: [conceptoPagoId], references: [id])
+
+  descripcion String?
+
+  cantidad Int   @default(1)
+  monto    Float
+
+  @@index([pagoId])
+  @@index([conceptoPagoId])
+}
+
+model Adeudo {
+  id String @id @default(uuid())
+
+  alumnoId String
+
+  alumno Alumno @relation(fields: [alumnoId], references: [id])
+
+  conceptoPagoId String?
+
+  concepto ConceptoPago? @relation(fields: [conceptoPagoId], references: [id])
+
+  cicloEscolarId String?
+
+  cicloEscolar CicloEscolar? @relation(fields: [cicloEscolarId], references: [id])
+
+  descripcion String?
+
+  monto Float
+  saldo Float
+
+  fechaLimite DateTime?
+
+  pagado Boolean @default(false)
+
+  createdById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([alumnoId])
+  @@index([pagado])
 }
 
 /**
  * =========================================
- * 🎭 ROLES
+ * 🗂️ TRÁMITES (caja → secretaría)
  * =========================================
  */
 
-enum Role {
-  ADMIN
-  ALUMNO
-  CAJA
-  DIRECTOR
-  MAESTRO
-  SECRETARIA
+model Tramite {
+  id String @id @default(uuid())
+
+  alumnoId String
+
+  alumno Alumno @relation(fields: [alumnoId], references: [id])
+
+  conceptoPagoId String?
+
+  concepto ConceptoPago? @relation(fields: [conceptoPagoId], references: [id])
+
+  // El pago que lo originó.
+  pagoId String?
+
+  pago Pago? @relation(fields: [pagoId], references: [id])
+
+  estado EstadoTramite @default(SOLICITADO)
+
+  notas String?
+
+  atendidoPorId String?
+  atendidoEn    DateTime?
+
+  entregadoEn DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([alumnoId])
+  @@index([estado])
 }
 
 /**
  * =========================================
- * 📌 ESTADOS ASISTENCIA
+ * 📌 OBSERVACIONES
+ * =========================================
+ *
+ * Antes una observación era texto suelto dentro de Alumno o de Clase:
+ * se escribía y ahí moría. Aquí es una entidad con dueño, tipo, estatus
+ * y seguimiento, y puede colgar de cualquier elemento del sistema.
+ *
+ * Todos los vínculos son opcionales: una observación puede ser solo de
+ * un alumno, solo de un docente, o de un alumno EN una materia y grupo.
+ */
+
+model Observacion {
+  id String @id @default(uuid())
+
+  tipo     TipoObservacion     @default(OTRA)
+  gravedad GravedadObservacion @default(MEDIA)
+  estatus  EstatusObservacion  @default(ABIERTA)
+
+  titulo      String
+  descripcion String
+
+  // A quién / a qué se refiere. Al menos uno debería venir;
+  // la validación vive en el router.
+  alumnoId String?
+  alumno   Alumno? @relation(fields: [alumnoId], references: [id])
+
+  docenteId String?
+  docente   Docente? @relation(fields: [docenteId], references: [id])
+
+  grupoId String?
+  grupo   Grupo? @relation(fields: [grupoId], references: [id])
+
+  materiaId String?
+  materia   Materia? @relation(fields: [materiaId], references: [id])
+
+  claseId String?
+  clase   Clase? @relation(fields: [claseId], references: [id])
+
+  evidenciaUrl String?
+
+  // Cierre
+  resueltaEn     DateTime?
+  resolucion     String?
+  resueltaPorId  String?
+
+  seguimientos ObservacionSeguimiento[]
+
+  createdById String?
+  updatedById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([alumnoId])
+  @@index([docenteId])
+  @@index([grupoId])
+  @@index([estatus])
+  @@index([tipo])
+  @@index([createdAt])
+}
+
+// Cada nota de avance. Es lo que convierte una observación
+// en algo con seguimiento y no en un comentario perdido.
+model ObservacionSeguimiento {
+  id String @id @default(uuid())
+
+  observacionId String
+
+  observacion Observacion @relation(fields: [observacionId], references: [id], onDelete: Cascade)
+
+  nota String
+
+  // Estatus al que se movió la observación con esta nota, si cambió.
+  estatusNuevo EstatusObservacion?
+
+  createdById String?
+
+  createdAt DateTime @default(now())
+
+  @@index([observacionId])
+}
+
+/**
+ * =========================================
+ * 🔍 AUDITORÍA
+ * Responde: quién, qué, cuándo y qué valor tenía antes.
  * =========================================
  */
 
-enum EstadoAsistencia {
-  PRESENTE
-  FALTA
-  RETARDO
+model AuditLog {
+  id String @id @default(uuid())
+
+  usuarioId String?
+
+  usuario User? @relation(fields: [usuarioId], references: [id])
+
+  accion AccionAudit
+
+  entidad   String // "Calificacion", "Pago", …
+  entidadId String
+
+  valorAnterior Json?
+  valorNuevo    Json?
+
+  ip        String?
+  userAgent String?
+
+  createdAt DateTime @default(now())
+
+  @@index([entidad, entidadId])
+  @@index([usuarioId])
+  @@index([createdAt])
 }

@@ -41,21 +41,31 @@ router.get(
         });
 
       res.json({
+
         success: true,
+
         data: ciclos
+
       });
 
     } catch (error) {
 
-      console.error(error);
+      console.error(
+        "ERROR OBTENER CICLOS:",
+        error
+      );
 
       res.status(500).json({
+
         success: false,
+
         message:
           "Error obteniendo ciclos"
+
       });
 
     }
+
   }
 );
 
@@ -83,58 +93,96 @@ router.post(
         fechaFin
       } = req.body;
 
+      // 🔴 VALIDACIÓN
       if (!nombre) {
+
         return res.status(400).json({
+
           success: false,
+
           message:
             "Nombre requerido"
+
         });
+
       }
 
+      // 🔍 VALIDAR EXISTENTE
       const existe =
-        await prisma.cicloEscolar.findUnique({
+        await prisma.cicloEscolar.findFirst({
+
           where: {
             nombre
           }
+
         });
 
       if (existe) {
+
         return res.status(400).json({
+
           success: false,
+
           message:
             "El ciclo ya existe"
+
         });
+
       }
 
+      // 🔥 CREAR
       const ciclo =
         await prisma.cicloEscolar.create({
 
           data: {
+
             nombre,
-            fechaInicio,
-            fechaFin
+
+            fechaInicio:
+              fechaInicio
+                ? new Date(fechaInicio)
+                : null,
+
+            fechaFin:
+              fechaFin
+                ? new Date(fechaFin)
+                : null,
+
+            activo: false
+
           }
 
         });
 
       res.json({
+
         success: true,
+
         message:
           "Ciclo creado correctamente",
+
         data: ciclo
+
       });
 
     } catch (error) {
 
-      console.error(error);
+      console.error(
+        "ERROR CREAR CICLO:",
+        error
+      );
 
       res.status(500).json({
+
         success: false,
+
         message:
           "Error creando ciclo"
+
       });
 
     }
+
   }
 );
 
@@ -158,14 +206,16 @@ router.put(
 
       const { id } = req.params;
 
-      // 🔥 desactivar todos
+      // 🔥 DESACTIVAR TODOS
       await prisma.cicloEscolar.updateMany({
+
         data: {
           activo: false
         }
+
       });
 
-      // 🔥 activar uno
+      // 🔥 ACTIVAR UNO
       const ciclo =
         await prisma.cicloEscolar.update({
 
@@ -180,23 +230,92 @@ router.put(
         });
 
       res.json({
+
         success: true,
+
         message:
-          "Ciclo activado",
+          "Ciclo activado correctamente",
+
         data: ciclo
+
       });
 
     } catch (error) {
 
-      console.error(error);
+      console.error(
+        "ERROR ACTIVAR CICLO:",
+        error
+      );
 
       res.status(500).json({
+
         success: false,
+
         message:
           "Error activando ciclo"
+
       });
 
     }
+
+  }
+);
+
+
+// ========================================
+// ❌ ELIMINAR CICLO
+// ========================================
+router.delete(
+  "/:id",
+
+  verifyToken,
+
+  checkRole([
+    "ADMIN",
+    "DIRECTOR"
+  ]),
+
+  async (req, res) => {
+
+    try {
+
+      const { id } = req.params;
+
+      await prisma.cicloEscolar.delete({
+
+        where: {
+          id
+        }
+
+      });
+
+      res.json({
+
+        success: true,
+
+        message:
+          "Ciclo eliminado correctamente"
+
+      });
+
+    } catch (error) {
+
+      console.error(
+        "ERROR ELIMINAR CICLO:",
+        error
+      );
+
+      res.status(500).json({
+
+        success: false,
+
+        message:
+          "Error eliminando ciclo"
+
+      });
+
+    }
+
   }
 );
 

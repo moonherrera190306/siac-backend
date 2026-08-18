@@ -42,9 +42,14 @@ router.post(
 router.get(
   "/",
   verifyToken,
+  checkRole(["ADMIN", "DIRECTOR", "SECRETARIA"]),
   async (req, res) => {
     try {
-      const programas = await prisma.programa.findMany();
+      // Incluye el nivel: el frontend lo necesita para saber si
+      // aplican trayectorias (solo preparatoria).
+      const programas = await prisma.programa.findMany({
+        include: { nivelAcademico: true }
+      });
 
       res.json(programas);
 

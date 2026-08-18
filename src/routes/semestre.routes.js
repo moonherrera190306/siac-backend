@@ -45,6 +45,7 @@ router.post(
 router.get(
   "/",
   verifyToken,
+  checkRole(["ADMIN", "DIRECTOR", "SECRETARIA"]),
   async (req, res) => {
     try {
       const data = await prisma.semestre.findMany({

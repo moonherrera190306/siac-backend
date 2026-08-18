@@ -1,18 +1,63 @@
 import jwt from "jsonwebtoken";
+import prisma from "../lib/prisma.js";
 
-export const verifyToken = (req, res, next) => {
+export const COOKIE_TOKEN = "siac_token";
+
+/**
+ * Lee una cookie sin depender de cookie-parser.
+ */
+function leerCookie(req, nombre) {
+  const crudo = req.headers.cookie;
+
+  if (!crudo) return null;
+
+  for (const parte of crudo.split(";")) {
+    const [clave, ...resto] = parte.trim().split("=");
+
+    if (clave === nombre) return decodeURIComponent(resto.join("="));
+  }
+
+  return null;
+}
+
+/**
+ * 🔐 El token viaja en una cookie httpOnly, no en localStorage:
+ * así un XSS no puede leerlo.
+ *
+ * El header Authorization se sigue aceptando para clientes que no
+ * son el navegador (Postman, scripts, integraciones).
+ */
+export const verifyToken = async (req, res, next) => {
   try {
-    const authHeader = req.headers.authorization;
+    let token = leerCookie(req, COOKIE_TOKEN);
 
-    if (!authHeader) {
-      return res.status(401).json({ message: "No token provided" });
+    if (!token) {
+      const authHeader = req.headers.authorization;
+
+      // 🔥 Antes hacía split(" ")[1] sin comprobar el esquema.
+      if (authHeader && authHeader.startsWith("Bearer ")) {
+        token = authHeader.slice(7).trim();
+      }
     }
 
-    const token = authHeader.split(" ")[1];
+    if (!token) {
+      return res.status(401).json({ message: "No autenticado" });
+    }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
-    req.user = decoded;
+    // 🔒 Un token sigue siendo válido aunque la cuenta se haya desactivado:
+    // hay que comprobarlo contra la base.
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.id },
+      select: { id: true, activo: true, role: true },
+    });
+
+    if (!user || !user.activo) {
+      return res.status(401).json({ message: "Cuenta desactivada" });
+    }
+
+    req.user = { ...decoded, role: user.role };
 
     next();
   } catch (error) {

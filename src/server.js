@@ -25,17 +25,32 @@ from "./routes/ciclo.routes.js";
 import asignacionRoutes
 from "./routes/asignacion.routes.js";
 
+// 🔥 ESTRUCTURA ACADÉMICA
+import nivelRoutes from "./routes/nivel.routes.js";
+import turnoRoutes from "./routes/turno.routes.js";
+import trayectoriaRoutes from "./routes/trayectoria.routes.js";
+import horarioRoutes from "./routes/horario.routes.js";
+import inscripcionRoutes from "./routes/inscripcion.routes.js";
+import tramiteRoutes from "./routes/tramite.routes.js";
+import claseRoutes from "./routes/clase.routes.js";
+import observacionRoutes from "./routes/observacion.routes.js";
+import auditoriaRoutes from "./routes/auditoria.routes.js";
+
 dotenv.config();
 
 const app = express();
 
 // 🔥 CORS SEGURO PRODUCCIÓN
+// Los orígenes permitidos se configuran con la variable CORS_ORIGINS,
+// separados por coma. Ej: CORS_ORIGINS=https://siac.vercel.app,https://www.ceszam.mx
+const corsOrigins = (process.env.CORS_ORIGINS || "http://localhost:3000")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
 app.use(
   cors({
-    origin: [
-      "http://localhost:3000",
-      "https://TU-FRONTEND.vercel.app",
-    ],
+    origin: corsOrigins,
     credentials: true,
   })
 );
@@ -69,6 +84,16 @@ app.use(
   "/api/asignaciones",
   asignacionRoutes
 );
+
+app.use("/api/niveles", nivelRoutes);
+app.use("/api/turnos", turnoRoutes);
+app.use("/api/trayectorias", trayectoriaRoutes);
+app.use("/api/horarios", horarioRoutes);
+app.use("/api/inscripciones", inscripcionRoutes);
+app.use("/api/tramites", tramiteRoutes);
+app.use("/api/clases", claseRoutes);
+app.use("/api/observaciones", observacionRoutes);
+app.use("/api/auditoria", auditoriaRoutes);
 
 //app.use("/api/secretaria", secretariaRoutes);
 //app.use("/api/caja", cajaRoutes);

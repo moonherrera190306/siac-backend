@@ -46,7 +46,13 @@ router.get(
 
             grupo: true,
 
-            cicloEscolar: true
+            cicloEscolar: true,
+
+            // 🔥 Los bloques de horario se administran en /api/horarios,
+            // pero la lista los necesita para mostrar cuántos tiene cada una.
+            horarios: {
+              orderBy: [{ dia: "asc" }, { horaInicio: "asc" }]
+            }
 
           },
 
@@ -102,7 +108,7 @@ router.post(
         docenteId,
         grupoId,
         cicloEscolarId,
-        horario,
+        horarios,
         aula
 
       } = req.body;
@@ -196,13 +202,14 @@ router.post(
       }
 
       // 🚫 EVITAR DUPLICADOS
+      // 🔥 la llave real es materia+grupo+ciclo, sin importar el docente:
+      // un grupo no puede tener la misma materia dos veces en el mismo ciclo
       const existe =
         await prisma.asignacionMateria.findFirst({
 
           where: {
 
             materiaId,
-            docenteId,
             grupoId,
             cicloEscolarId
 
@@ -215,7 +222,7 @@ router.post(
         return res.status(400).json({
           success: false,
           message:
-            "La asignación ya existe"
+            "Este grupo ya tiene esta materia asignada en este ciclo escolar"
         });
 
       }
@@ -230,8 +237,13 @@ router.post(
             docenteId,
             grupoId,
             cicloEscolarId,
-            horario,
-            aula
+            aula,
+
+            // 🔥 El horario dejó de ser texto: se crean registros reales.
+            // horarios: [{ dia: "LUNES", horaInicio: "07:00", horaFin: "08:00" }]
+            ...(Array.isArray(horarios) && horarios.length > 0
+              ? { horarios: { create: horarios } }
+              : {})
 
           },
 
@@ -266,6 +278,16 @@ router.post(
         "🔥 ERROR CREANDO ASIGNACIÓN:",
         error
       );
+
+      // 🔒 respaldo del @@unique en el schema, por si el findFirst
+      // no alcanzó a atrapar una race condition
+      if (error.code === "P2002") {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Este grupo ya tiene esta materia asignada en este ciclo escolar"
+        });
+      }
 
       res.status(500).json({
         success: false,

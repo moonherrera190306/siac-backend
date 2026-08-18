@@ -8,6 +8,9 @@ export default defineConfig({
   schema: "prisma/schema.prisma",
   migrations: {
     path: "prisma/migrations",
+    // Sin esto, `prisma migrate reset` NO siembra: la config de
+    // package.json#prisma quedó anulada por este archivo.
+    seed: "node prisma/seed.js",
   },
   engine: "classic",
   datasource: {

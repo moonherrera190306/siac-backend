@@ -5,45 +5,65 @@ export const getDocentesResumen = async (req, res) => {
     const docentes = await prisma.docente.findMany({
       include: {
         user: true,
-        materias: {
+        asignaciones: {
           include: {
+            materia: true,
             grupo: true,
-            calificaciones: true,
+            cicloEscolar: true,
           },
         },
       },
     });
 
-    const data = docentes.map((d) => {
-      // total grupos únicos
-      const grupos = new Set(
-        d.materias.map((m) => m.grupo?.id)
-      ).size;
+    const data = await Promise.all(
+      docentes.map(async (d) => {
+        // total de grupos únicos que atiende
+        const gruposUnicos = new Set(
+          d.asignaciones.map((a) => a.grupoId).filter(Boolean)
+        );
 
-      // promedio general del docente
-      const todasCalificaciones = d.materias.flatMap(
-        (m) => m.calificaciones
-      );
+        // calificaciones reales de CADA asignación de este docente:
+        // cruzamos materia + ciclo + grupo (vía alumno.grupoId), porque
+        // Calificacion no guarda directamente a qué docente/grupo pertenece
+        const calificacionesPorAsignacion = await Promise.all(
+          d.asignaciones.map((a) =>
+            prisma.calificacion.findMany({
+              where: {
+                materiaId: a.materiaId,
+                cicloEscolarId: a.cicloEscolarId,
+                alumno: { grupoId: a.grupoId },
+                valor: { not: null }, // excluye AC/NA, que no promedian numéricamente
+              },
+            })
+          )
+        );
 
-      const promedio =
-        todasCalificaciones.length > 0
-          ? todasCalificaciones.reduce((acc, c) => acc + c.calificacion, 0) /
-            todasCalificaciones.length
-          : 0;
+        const todasCalificaciones = calificacionesPorAsignacion.flat();
 
-      let desempeño = "Bueno";
+        const promedio =
+          todasCalificaciones.length > 0
+            ? todasCalificaciones.reduce((acc, c) => acc + c.valor, 0) /
+              todasCalificaciones.length
+            : null;
 
-      if (promedio >= 9) desempeño = "Alto";
-      else if (promedio < 8.5) desempeño = "Seguimiento";
+        let desempeno = "Sin datos";
 
-      return {
-        id: d.id,
-        nombre: d.user.name,
-        materia: d.materias[0]?.nombre || "Sin asignar",
-        grupos,
-        desempeño,
-      };
-    });
+        if (promedio !== null) {
+          if (promedio >= 9) desempeno = "Alto";
+          else if (promedio >= 8.5) desempeno = "Bueno";
+          else desempeno = "Seguimiento";
+        }
+
+        return {
+          id: d.id,
+          nombre: d.user.name,
+          materia: d.asignaciones[0]?.materia?.nombre || "Sin asignar",
+          grupos: gruposUnicos.size,
+          promedio: promedio !== null ? Number(promedio.toFixed(2)) : null,
+          desempeno,
+        };
+      })
+    );
 
     res.json({
       ok: true,
@@ -56,4 +76,4 @@ export const getDocentesResumen = async (req, res) => {
       message: "Error obteniendo docentes",
     });
   }
-};  
+};

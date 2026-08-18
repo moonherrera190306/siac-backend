@@ -9,14 +9,51 @@ const router = express.Router();
 router.use(verifyToken, checkRole(["DIRECTOR"]));
 
 /* =========================
+   🧮 HELPERS
+========================= */
+
+function esNumerico(valor) {
+  if (valor === null || valor === undefined || valor === "") return false;
+  return !isNaN(Number(valor));
+}
+
+// Promedio real del kardex: se usa la nota definitiva.
+function promedioDeKardex(calificaciones) {
+  const numericas = calificaciones
+    .map((c) => c.notaDefinitiva)
+    .filter(esNumerico)
+    .map(Number);
+
+  if (numericas.length === 0) return null;
+
+  return numericas.reduce((acc, n) => acc + n, 0) / numericas.length;
+}
+
+/* =========================
    📊 DASHBOARD
 ========================= */
 router.get("/dashboard", async (req, res) => {
   try {
-    const totalAlumnos = await prisma.alumno.count();
-    const totalDocentes = await prisma.docente.count();
-    const totalGrupos = await prisma.grupo.count();
-    const totalPagos = await prisma.pago.count();
+    const [totalAlumnos, totalDocentes, totalGrupos, totalPagos, mensual] =
+      await Promise.all([
+        prisma.alumno.count({ where: { activo: true } }),
+        prisma.docente.count({ where: { activo: true } }),
+        prisma.grupo.count({ where: { activo: true } }),
+        prisma.pago.count({ where: { estado: "PAGADO" } }),
+        prisma.asistenciaMensual.findMany({ select: { porcentaje: true } }),
+      ]);
+
+    // 🔥 Ya no es un 92 fijo: sale del acumulado real de asistencia.
+    const conDato = mensual.filter((m) => m.porcentaje !== null);
+
+    const asistenciaGlobal =
+      conDato.length === 0
+        ? null
+        : Number(
+            (
+              conDato.reduce((acc, m) => acc + m.porcentaje, 0) / conDato.length
+            ).toFixed(1)
+          );
 
     return res.status(200).json({
       success: true,
@@ -25,7 +62,7 @@ router.get("/dashboard", async (req, res) => {
         totalDocentes,
         totalGrupos,
         totalPagos,
-        asistenciaGlobal: 92,
+        asistenciaGlobal,
       },
     });
   } catch (error) {
@@ -44,6 +81,7 @@ router.get("/dashboard", async (req, res) => {
 router.get("/alumnos", async (req, res) => {
   try {
     const alumnos = await prisma.alumno.findMany({
+      where: { activo: true },
       include: {
         user: true,
         grupo: true,
@@ -52,31 +90,25 @@ router.get("/alumnos", async (req, res) => {
     });
 
     const data = alumnos.map((a) => {
-      const califs = Array.isArray(a.calificaciones)
-        ? a.calificaciones
-        : [];
-
-      const promedio =
-        califs.length > 0
-          ? califs.reduce(
-              (acc, c) => acc + (c.calificacion || 0),
-              0
-            ) / califs.length
-          : 0;
+      // 🔥 Antes leía `c.calificacion`, un campo que no existe:
+      // el promedio siempre salía 0 y todos aparecían en seguimiento.
+      const promedio = promedioDeKardex(a.calificaciones ?? []);
 
       return {
         id: a.id,
         nombre: a.user?.name || "Sin nombre",
         grupo: a.grupo?.nombre || "Sin grupo",
-        promedio: promedio.toFixed(1),
-        estado: promedio < 8 ? "Seguimiento" : "Activo",
+        promedio: promedio === null ? null : promedio.toFixed(1),
+        estado:
+          promedio === null
+            ? "Sin calificaciones"
+            : promedio < 8
+            ? "Seguimiento"
+            : "Activo",
       };
     });
 
-    return res.status(200).json({
-      success: true,
-      data,
-    });
+    return res.status(200).json({ success: true, data });
   } catch (error) {
     console.error("ERROR ALUMNOS:", error);
 
@@ -92,117 +124,142 @@ router.get("/alumnos", async (req, res) => {
 ========================= */
 router.get("/calificaciones", async (req, res) => {
   try {
+    const { cicloEscolarId, grupoId } = req.query;
+
     const calificaciones = await prisma.calificacion.findMany({
+      where: {
+        ...(cicloEscolarId ? { cicloEscolarId } : {}),
+        ...(grupoId ? { alumno: { grupoId } } : {}),
+      },
       include: {
-        alumno: {
-          include: {
-            user: true,
-          },
-        },
+        alumno: { include: { user: true, grupo: true } },
         materia: true,
+        cicloEscolar: true,
       },
     });
 
-    return res.status(200).json({
-      success: true,
-      data: calificaciones,
-    });
+    return res.status(200).json({ success: true, data: calificaciones });
   } catch (error) {
     console.error("ERROR CALIFICACIONES:", error);
 
     return res.status(500).json({
       success: false,
-      message:
-        error.message || "Error obteniendo calificaciones",
+      message: error.message || "Error obteniendo calificaciones",
     });
   }
 });
 
 /* =========================
-   📅 ASISTENCIAS
+   📅 ASISTENCIAS POR GRUPO
 ========================= */
 router.get("/asistencias", async (req, res) => {
   try {
     const grupos = await prisma.grupo.findMany({
-      include: {
-        alumnos: {
-          include: {
-            asistencias: true,
-          },
-        },
-      },
+      where: { activo: true },
+      include: { alumnos: { select: { id: true } } },
     });
 
-    const resultado = grupos.map((g) => {
+    const resultado = [];
+
+    for (const g of grupos) {
+      const ids = g.alumnos.map((a) => a.id);
+
+      // 🔥 Antes leía `as.presente`, un campo inexistente:
+      // toda la asistencia se contaba como falta y siempre daba 0%.
+      const mensual =
+        ids.length === 0
+          ? []
+          : await prisma.asistenciaMensual.findMany({
+              where: { alumnoId: { in: ids } },
+            });
+
       let asistencias = 0;
       let faltas = 0;
 
-      (g.alumnos ?? []).forEach((a) => {
-        (a.asistencias ?? []).forEach((as) => {
-          if (as.presente) {
-            asistencias++;
-          } else {
-            faltas++;
-          }
-        });
-      });
+      for (const m of mensual) {
+        asistencias += m.asisMes1 + m.asisMes2 + m.asisMes3 + m.asisMes4;
+        faltas += m.faltasMes1 + m.faltasMes2 + m.faltasMes3 + m.faltasMes4;
+      }
 
       const total = asistencias + faltas;
+      const porcentaje = total > 0 ? (asistencias / total) * 100 : null;
 
-      const porcentaje =
-        total > 0 ? (asistencias / total) * 100 : 0;
-
-      return {
+      resultado.push({
+        grupoId: g.id,
         grupo: g.nombre,
-        asistencia: porcentaje.toFixed(1) + "%",
+        alumnos: ids.length,
+        asistencia: porcentaje === null ? null : porcentaje.toFixed(1) + "%",
         faltas,
         estatus:
-          porcentaje < 90
+          porcentaje === null
+            ? "Sin registros"
+            : porcentaje < 90
             ? "Atención"
             : porcentaje < 95
             ? "Estable"
             : "Excelente",
-      };
-    });
+      });
+    }
 
-    return res.status(200).json({
-      success: true,
-      data: resultado,
-    });
+    return res.status(200).json({ success: true, data: resultado });
   } catch (error) {
     console.error("ERROR ASISTENCIAS:", error);
 
     return res.status(500).json({
       success: false,
-      message:
-        error.message || "Error obteniendo asistencias",
+      message: error.message || "Error obteniendo asistencias",
     });
   }
 });
 
 /* =========================
    👨‍🏫 DOCENTES
+   Cumplimiento real: clases programadas vs. registradas.
 ========================= */
 router.get("/docentes", async (req, res) => {
   try {
     const docentes = await prisma.docente.findMany({
+      where: { activo: true },
       include: {
         user: true,
+        asignaciones: {
+          where: { cicloEscolar: { activo: true } },
+          include: { materia: true, grupo: true },
+        },
       },
     });
 
-    const data = docentes.map((d) => ({
-      id: d.id,
-      nombre: d.user?.name || "Sin nombre",
-      materia: "Sin materia",
-      grupos: 0,
-      desempeño: "Bueno",
-    }));
+    const data = [];
 
-    return res.status(200).json({
-      success: true,
-      data,
-    });
+    for (const d of docentes) {
+      const ids = d.asignaciones.map((a) => a.id);
+
+      const [programadas, registradas] = await Promise.all([
+        ids.length === 0
+          ? 0
+          : prisma.clase.count({ where: { asignacionId: { in: ids } } }),
+        ids.length === 0
+          ? 0
+          : prisma.clase.count({
+              where: { asignacionId: { in: ids }, registrada: true },
+            }),
+      ]);
+
+      const cumplimiento =
+        programadas === 0 ? null : (registradas / programadas) * 100;
+
+      data.push({
+        id: d.id,
+        nombre: d.nombre || d.user?.name || "Sin nombre",
+        materias: d.asignaciones.map((a) => a.materia?.nombre).filter(Boolean),
+        grupos: new Set(d.asignaciones.map((a) => a.grupoId)).size,
+        clasesProgramadas: programadas,
+        clasesRegistradas: registradas,
+        cumplimiento: cumplimiento === null ? null : cumplimiento.toFixed(1) + "%",
+      });
+    }
+
+    return res.status(200).json({ success: true, data });
   } catch (error) {
     console.error("ERROR DOCENTES:", error);
 
@@ -218,29 +275,40 @@ router.get("/docentes", async (req, res) => {
 ========================= */
 router.get("/materias", async (req, res) => {
   try {
+    // 🔥 Materia no tiene relación directa con Docente:
+    // el docente llega a través de AsignacionMateria.
     const materias = await prisma.materia.findMany({
+      where: { activo: true },
       include: {
-        docente: {
-          include: {
-            user: true,
-          },
+        asignaciones: {
+          where: { cicloEscolar: { activo: true } },
+          include: { docente: { include: { user: true } } },
+        },
+        calificaciones: {
+          where: { cicloEscolar: { activo: true } },
+          select: { notaDefinitiva: true },
         },
       },
     });
 
-    const data = materias.map((m) => ({
-      id: m.id,
-      nombre: m.nombre,
-      docente:
-        m.docente?.user?.name || "Sin docente",
-      promedio: 85,
-      estatus: "Estable",
-    }));
+    const data = materias.map((m) => {
+      const promedio = promedioDeKardex(m.calificaciones ?? []);
 
-    return res.status(200).json({
-      success: true,
-      data,
+      return {
+        id: m.id,
+        clave: m.clave,
+        nombre: m.nombre,
+        tipo: m.tipo,
+        docentes: m.asignaciones
+          .map((a) => a.docente?.nombre || a.docente?.user?.name)
+          .filter(Boolean),
+        promedio: promedio === null ? null : promedio.toFixed(1),
+        estatus:
+          promedio === null ? "Sin datos" : promedio < 7 ? "Atención" : "Estable",
+      };
     });
+
+    return res.status(200).json({ success: true, data });
   } catch (error) {
     console.error("ERROR MATERIAS:", error);
 
@@ -256,17 +324,22 @@ router.get("/materias", async (req, res) => {
 ========================= */
 router.get("/grupos", async (req, res) => {
   try {
+    // 🔥 Grupo no tiene relación `materias`: llegan por asignaciones.
     const grupos = await prisma.grupo.findMany({
       include: {
-        alumnos: true,
-        materias: true,
+        alumnos: { include: { user: true } },
+        turno: true,
+        semestre: true,
+        asignaciones: {
+          include: {
+            materia: true,
+            docente: { include: { user: true } },
+          },
+        },
       },
     });
 
-    return res.status(200).json({
-      success: true,
-      data: grupos,
-    });
+    return res.status(200).json({ success: true, data: grupos });
   } catch (error) {
     console.error("ERROR GRUPOS:", error);
 
@@ -282,19 +355,20 @@ router.get("/grupos", async (req, res) => {
 ========================= */
 router.get("/reportes", async (req, res) => {
   try {
-    const alumnos = await prisma.alumno.count();
-
-    const pagos = await prisma.pago.aggregate({
-      _sum: {
-        monto: true,
-      },
-    });
+    const [alumnos, pagos] = await Promise.all([
+      prisma.alumno.count({ where: { activo: true } }),
+      // 🔥 El campo ya no es `monto` sino `total`, y los cancelados no cuentan.
+      prisma.pago.aggregate({
+        where: { estado: "PAGADO" },
+        _sum: { total: true },
+      }),
+    ]);
 
     return res.status(200).json({
       success: true,
       data: {
         totalAlumnos: alumnos,
-        ingresos: pagos?._sum?.monto || 0,
+        ingresos: pagos?._sum?.total || 0,
       },
     });
   } catch (error) {

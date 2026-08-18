@@ -1,4 +1,5 @@
-import prisma from "../src/lib/prisma.js";
+import "dotenv/config";
+import prisma from "../lib/prisma.js";
 import bcrypt from "bcrypt";
 
 console.log("🔥 SCRIPT INICIADO");

@@ -43,6 +43,7 @@ router.post(
 router.get(
   "/",
   verifyToken,
+  checkRole(["ADMIN", "DIRECTOR", "SECRETARIA"]),
   async (req, res) => {
     try {
       const carreras = await prisma.carrera.findMany({

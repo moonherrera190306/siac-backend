@@ -1,9 +1,8 @@
+const isDev = process.env.NODE_ENV !== "production";
+
 export const checkRole = (roles = []) => {
   return (req, res, next) => {
     try {
-      // 🔥 DEBUG
-      console.log("USER TOKEN:", req.user);
-
       // 🔥 VALIDAR USER
       if (!req.user) {
         return res.status(401).json({
@@ -17,16 +16,12 @@ export const checkRole = (roles = []) => {
         req.user.rol ||
         "";
 
-      // 🔥 DEBUG
-      console.log(
-        "ROLE ACTUAL:",
-        userRole
-      );
-
-      console.log(
-        "ROLES PERMITIDOS:",
-        roles
-      );
+      // 🔥 DEBUG — solo en desarrollo.
+      // En producción no se registran datos del usuario en los logs.
+      if (isDev) {
+        console.log("ROLE ACTUAL:", userRole);
+        console.log("ROLES PERMITIDOS:", roles);
+      }
 
       // 🔥 CHECK
       if (!roles.includes(userRole)) {
