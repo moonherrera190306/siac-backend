@@ -49,7 +49,16 @@ router.get(
         prisma.tramite.findMany({
           where,
           include: {
-            alumno: { include: { user: true, grupo: true, carrera: true } },
+            // La constancia imprime semestre, turno y trayectoria: sin
+            // estos anidados salen vacíos en el documento.
+            alumno: {
+              include: {
+                user: true,
+                carrera: true,
+                trayectoria: true,
+                grupo: { include: { turno: true, semestre: true } },
+              },
+            },
             concepto: true,
             pago: { select: { folio: true, pagadoEn: true, estado: true } },
           },

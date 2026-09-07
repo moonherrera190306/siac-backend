@@ -3,3 +3,14 @@ node_modules
 .env
 
 /src/generated/prisma
+
+# ⚠️ DATOS PERSONALES — nunca a control de versiones.
+# Los JSON del legado traen nombre, CURP, domicilio, teléfono y tutor de
+# 1,737 alumnos; los dumps traen la base completa del sistema anterior.
+# El código para regenerarlos (extraer*.py) SÍ se versiona; los datos no.
+/prisma/legado/datos/
+/prisma/legado/dumps/
+/prisma/legado/horarios/
+
+# Contraseñas de acceso.
+/prisma/credenciales/

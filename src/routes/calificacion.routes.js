@@ -481,7 +481,12 @@ router.get(
 
       const data = await prisma.calificacion.findMany({
         where: { alumnoId },
-        include: { materia: true, cicloEscolar: true },
+        // La constancia de calificaciones agrupa por semestre, así que
+        // hace falta el semestre de cada materia, no solo su nombre.
+        include: {
+          materia: { include: { semestre: true } },
+          cicloEscolar: true,
+        },
         orderBy: { createdAt: "desc" },
       });
 

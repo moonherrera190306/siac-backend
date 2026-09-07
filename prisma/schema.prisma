@@ -153,6 +153,11 @@ model User {
   password String
   role     Role
 
+  // 🔥 LIBRO FÍSICO: iniciales con las que firma en el recibo de papel
+  // (LBZ, PAG, MRCM, EASO). Se estampan solas en `Pago.iniciales` al cobrar,
+  // así el historial digital se empata con el libro sin capturarlas a mano.
+  iniciales String?
+
   activo Boolean @default(true)
 
   debeCambiarPassword Boolean @default(true)

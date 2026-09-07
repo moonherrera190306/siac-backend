@@ -17,8 +17,11 @@ const router = express.Router();
  */
 
 /**
- * "María Fernanda López" → "MFL". Si el cajero no escribe sus iniciales,
- * se toman de su nombre: el recibo físico siempre las lleva.
+ * "María Fernanda López" → "MFL". Último recurso para las iniciales.
+ *
+ * El orden es: las que se escriban en el cobro → las guardadas en el
+ * usuario (`User.iniciales`, que son las reales del libro) → estas.
+ * Deducirlas del nombre falla con las de la escuela: "Mónica" no da "MRCM".
  */
 function inicialesDe(nombre) {
   if (!nombre) return null;
@@ -113,7 +116,7 @@ router.post(
               ? String(iniciales).trim().toUpperCase()
               : iniciales === ""
               ? null
-              : inicialesDe(req.user.name),
+              : req.user.iniciales || inicialesDe(req.user.name),
             cobradoPorId: req.user.id,
             detalles: { create: lineas },
           },

@@ -50,15 +50,21 @@ export const verifyToken = async (req, res, next) => {
     // hay que comprobarlo contra la base.
     const user = await prisma.user.findUnique({
       where: { id: decoded.id },
-      select: { id: true, activo: true, role: true, name: true },
+      select: { id: true, activo: true, role: true, name: true, iniciales: true },
     });
 
     if (!user || !user.activo) {
       return res.status(401).json({ message: "Cuenta desactivada" });
     }
 
-    // `name` se usa, por ejemplo, para las iniciales del cajero en el recibo.
-    req.user = { ...decoded, role: user.role, name: user.name };
+    // `iniciales` son las del libro físico (LBZ, PAG, MRCM, EASO) y mandan
+    // sobre las que se deducen de `name`: "Mónica" no da "MRCM".
+    req.user = {
+      ...decoded,
+      role: user.role,
+      name: user.name,
+      iniciales: user.iniciales,
+    };
 
     next();
   } catch (error) {

@@ -13,8 +13,16 @@ export default defineConfig({
     seed: "node prisma/seed.js",
   },
   engine: "classic",
-  // ⚠️ No declaramos `datasource` aquí: `env("DATABASE_URL")` truena si la
-  // variable no existe, y `prisma generate` corre en la fase de build del
-  // servidor, donde todavía no hay conexión a la base. La URL ya está
-  // declarada en `prisma/schema.prisma`, que es donde el CLI la busca.
+  // ⚠️ El `datasource` va CONDICIONADO a que exista la variable.
+  //
+  // Si se declara siempre, `prisma generate` truena en la fase de build del
+  // servidor, donde todavía no hay conexión a la base.
+  // Si no se declara nunca, `prisma migrate` truena en local con
+  // "Cannot destructure property 'url'": al existir este archivo el CLI ya
+  // no lee `env("DATABASE_URL")` de schema.prisma.
+  //
+  // Condicionado funcionan los dos casos.
+  ...(process.env.DATABASE_URL
+    ? { datasource: { url: process.env.DATABASE_URL } }
+    : {}),
 });
