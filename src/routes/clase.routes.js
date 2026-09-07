@@ -2,6 +2,11 @@ import express from "express";
 import prisma from "../lib/prisma.js";
 import { verifyToken } from "../middleware/auth.middleware.js";
 import { checkRole } from "../middleware/role.middleware.js";
+import {
+  ahoraEscolar,
+  estadoVentana,
+  TOLERANCIA_MINUTOS,
+} from "../lib/tolerancia.js";
 
 const router = express.Router();
 
@@ -249,6 +254,242 @@ router.get(
       res.status(500).json({
         success: false,
         message: "Error al calcular el cumplimiento",
+      });
+    }
+  }
+);
+
+/* =========================================
+   🕘 MIS CLASES DE HOY (BITÁCORA DEL DOCENTE)
+   Cada hora programada de hoy con su ventana de registro:
+   cuándo abre, cuánto le queda y si ya la registró.
+========================================= */
+router.get(
+  "/hoy",
+  verifyToken,
+  checkRole(["MAESTRO", "ADMIN", "DIRECTOR"]),
+  async (req, res) => {
+    try {
+      const ahora = ahoraEscolar();
+
+      let docenteId = req.query.docenteId || null;
+
+      if (req.user.role === "MAESTRO") {
+        const docente = await prisma.docente.findUnique({
+          where: { userId: req.user.id },
+        });
+
+        if (!docente) {
+          return res.status(403).json({
+            success: false,
+            message: "Tu usuario no está ligado a un expediente de docente",
+          });
+        }
+
+        docenteId = docente.id;
+      }
+
+      const horarios = await prisma.horario.findMany({
+        where: {
+          dia: ahora.dia,
+          asignacion: {
+            ...(docenteId ? { docenteId } : {}),
+            cicloEscolar: { activo: true },
+          },
+        },
+        include: {
+          asignacion: {
+            include: {
+              materia: true,
+              grupo: { include: { _count: { select: { alumnos: true } } } },
+              docente: { include: { user: true } },
+            },
+          },
+        },
+        orderBy: { horaInicio: "asc" },
+      });
+
+      const desde = new Date(`${ahora.fechaISO}T00:00:00.000Z`);
+      const hasta = new Date(`${ahora.fechaISO}T23:59:59.999Z`);
+
+      const clasesHoy = await prisma.clase.findMany({
+        where: {
+          fecha: { gte: desde, lte: hasta },
+          asignacionId: { in: horarios.map((h) => h.asignacionId) },
+        },
+        include: { _count: { select: { asistencias: true } } },
+      });
+
+      const data = horarios.map((h) => {
+        const ventana = estadoVentana(h.horaInicio, ahora);
+
+        const clase = clasesHoy.find(
+          (c) => c.horarioId === h.id || c.asignacionId === h.asignacionId
+        );
+
+        const registrada = Boolean(clase?.registrada);
+
+        return {
+          horarioId: h.id,
+          asignacionId: h.asignacionId,
+          materia: h.asignacion.materia?.nombre ?? "",
+          grupo: h.asignacion.grupo?.nombre ?? "",
+          alumnos: h.asignacion.grupo?._count?.alumnos ?? 0,
+          docente:
+            h.asignacion.docente?.nombre ||
+            h.asignacion.docente?.user?.name ||
+            "",
+          aula: h.aula || h.asignacion.aula || null,
+          horaInicio: h.horaInicio,
+          horaFin: h.horaFin,
+          cierraA: ventana.cierraA ?? null,
+          // ABIERTA = puede registrar ahora mismo.
+          estado: registrada ? "REGISTRADA" : ventana.estado,
+          abreEn: ventana.abreEn ?? null,
+          restan: ventana.restan ?? null,
+          minutosRetardo: registrada ? clase?.minutosRetardo ?? null : null,
+          tema: clase?.tema ?? null,
+          asistenciasCapturadas: clase?._count?.asistencias ?? 0,
+        };
+      });
+
+      res.json({
+        success: true,
+        data,
+        meta: {
+          fecha: ahora.fechaISO,
+          dia: ahora.dia,
+          hora: ahora.hora,
+          toleranciaMinutos: TOLERANCIA_MINUTOS,
+        },
+      });
+    } catch (error) {
+      console.error("ERROR CLASES DE HOY:", error);
+
+      res.status(500).json({
+        success: false,
+        message: "Error al obtener tus clases de hoy",
+      });
+    }
+  }
+);
+
+/* =========================================
+   ✅ REGISTRO DEL DÍA (DIRECCIÓN)
+   Quién ya registró su clase, quién llegó tarde y quién no registró.
+========================================= */
+router.get(
+  "/registro-dia",
+  verifyToken,
+  checkRole(["ADMIN", "DIRECTOR"]),
+  async (req, res) => {
+    try {
+      const ahora = ahoraEscolar();
+
+      const fechaISO = req.query.fecha || ahora.fechaISO;
+
+      // El día de la semana de la fecha consultada, no el de hoy.
+      const indice = new Date(`${fechaISO}T12:00:00Z`).getUTCDay();
+
+      const dia = [
+        "DOMINGO",
+        "LUNES",
+        "MARTES",
+        "MIERCOLES",
+        "JUEVES",
+        "VIERNES",
+        "SABADO",
+      ][indice];
+
+      const horarios = await prisma.horario.findMany({
+        where: {
+          dia,
+          asignacion: { cicloEscolar: { activo: true } },
+        },
+        include: {
+          asignacion: {
+            include: {
+              materia: true,
+              grupo: true,
+              docente: { include: { user: true } },
+            },
+          },
+        },
+        orderBy: { horaInicio: "asc" },
+      });
+
+      const desde = new Date(`${fechaISO}T00:00:00.000Z`);
+      const hasta = new Date(`${fechaISO}T23:59:59.999Z`);
+
+      const clases = await prisma.clase.findMany({
+        where: {
+          fecha: { gte: desde, lte: hasta },
+          asignacionId: { in: horarios.map((h) => h.asignacionId) },
+        },
+        include: { _count: { select: { asistencias: true } } },
+      });
+
+      const esHoy = fechaISO === ahora.fechaISO;
+
+      const data = horarios.map((h) => {
+        const clase = clases.find(
+          (c) => c.horarioId === h.id || c.asignacionId === h.asignacionId
+        );
+
+        const ventana = estadoVentana(h.horaInicio, ahora);
+
+        let estado;
+
+        if (clase?.registrada) {
+          estado = clase.minutosRetardo > 0 ? "REGISTRADA_TARDE" : "REGISTRADA";
+        } else if (esHoy && ventana.estado !== "VENCIDA") {
+          estado = "EN_TIEMPO"; // todavía puede registrarla
+        } else {
+          estado = "SIN_REGISTRO";
+        }
+
+        return {
+          horarioId: h.id,
+          docenteId: h.asignacion.docenteId,
+          docente:
+            h.asignacion.docente?.nombre ||
+            h.asignacion.docente?.user?.name ||
+            "Sin docente",
+          materia: h.asignacion.materia?.nombre ?? "",
+          grupo: h.asignacion.grupo?.nombre ?? "",
+          horaInicio: h.horaInicio,
+          horaFin: h.horaFin,
+          aula: h.aula || h.asignacion.aula || null,
+          estado,
+          registradaEn: clase?.registradaEn ?? null,
+          minutosRetardo: clase?.minutosRetardo ?? null,
+          tema: clase?.tema ?? null,
+          incidencias: clase?.incidencias ?? null,
+          alumnos: clase?._count?.asistencias ?? 0,
+        };
+      });
+
+      res.json({
+        success: true,
+        data,
+        meta: {
+          fecha: fechaISO,
+          dia,
+          hora: ahora.hora,
+          toleranciaMinutos: TOLERANCIA_MINUTOS,
+          programadas: data.length,
+          registradas: data.filter((d) => d.estado.startsWith("REGISTRADA"))
+            .length,
+          tarde: data.filter((d) => d.estado === "REGISTRADA_TARDE").length,
+          sinRegistro: data.filter((d) => d.estado === "SIN_REGISTRO").length,
+        },
+      });
+    } catch (error) {
+      console.error("ERROR REGISTRO DEL DÍA:", error);
+
+      res.status(500).json({
+        success: false,
+        message: "Error al obtener el registro del día",
       });
     }
   }

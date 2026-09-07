@@ -2,6 +2,7 @@ import express from "express";
 import { Prisma } from "@prisma/client";
 import prisma from "../lib/prisma.js";
 import { aCSV } from "../lib/csv.js";
+import { reportePDF } from "../lib/pdf.js";
 import { verifyToken } from "../middleware/auth.middleware.js";
 import { checkRole } from "../middleware/role.middleware.js";
 
@@ -24,7 +25,34 @@ function esNumerico(v) {
   return v !== null && v !== undefined && v !== "" && !isNaN(Number(v));
 }
 
-function responder(req, res, { nombre, filas, columnas, meta }) {
+/**
+ * Resume el `meta` del reporte en una línea legible bajo el título del PDF.
+ */
+function contexto(meta = {}) {
+  const partes = [];
+
+  if (meta.ciclo) partes.push(`Ciclo ${meta.ciclo}`);
+  if (meta.revisados !== undefined) partes.push(`${meta.revisados} alumnos revisados`);
+  if (meta.recibos !== undefined) partes.push(`${meta.recibos} recibos`);
+  if (meta.total !== undefined && meta.total !== null) {
+    partes.push(`Total $${Number(meta.total).toFixed(2)}`);
+  }
+
+  return partes.join(" · ");
+}
+
+function responder(req, res, { nombre, titulo, filas, columnas, meta }) {
+  if (req.query.formato === "pdf") {
+    return reportePDF(res, {
+      nombreArchivo: nombre,
+      titulo: titulo || nombre,
+      subtitulo: contexto(meta),
+      columnas,
+      filas,
+      horizontal: columnas.length > 6,
+    });
+  }
+
   if (req.query.formato === "csv") {
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader(
@@ -155,6 +183,7 @@ router.get(
 
       responder(req, res, {
         nombre: "alumnos-en-riesgo",
+        titulo: "Alumnos en riesgo",
         filas,
         columnas: [
           { id: "matricula", label: "Matrícula" },
@@ -256,6 +285,7 @@ router.get(
 
       responder(req, res, {
         nombre: "reporte-por-grupo",
+        titulo: "Desempeño por grupo",
         filas,
         columnas: [
           { id: "grupo", label: "Grupo" },
@@ -339,6 +369,7 @@ router.get(
 
       responder(req, res, {
         nombre: "ingresos",
+        titulo: "Ingresos por concepto",
         filas,
         columnas: [
           { id: "concepto", label: "Concepto" },
@@ -399,6 +430,7 @@ router.get(
 
       responder(req, res, {
         nombre: "padron-alumnos",
+        titulo: "Padrón de alumnos",
         filas,
         columnas: [
           { id: "matricula", label: "Matrícula" },

@@ -653,6 +653,11 @@ model Clase {
   registrada   Boolean   @default(false)
   registradaEn DateTime?
 
+  // 🔥 TOLERANCIA: minutos transcurridos entre la hora programada de la
+  // clase y el momento en que el docente registró. Null = no se pudo
+  // calcular (clase sin horario) o la registró dirección.
+  minutosRetardo Int?
+
   //////////////////////////////////////////////////
   // 🔥 BITÁCORA DOCENTE
   //////////////////////////////////////////////////
@@ -900,6 +905,12 @@ model Pago {
   // ALTER SEQUENCE "Pago_folio_seq" RESTART WITH 100053;
   folio Int @unique @default(autoincrement())
 
+  // 🔥 LIBRO FÍSICO: el recibo de papel vive en un libro numerado y lo
+  // firma quien cobró. Sin estos tres datos el historial digital no se
+  // puede empatar con el archivo físico.
+  libro     String?
+  iniciales String?
+
   alumnoId String
 
   alumno Alumno @relation(fields: [alumnoId], references: [id])
@@ -932,6 +943,7 @@ model Pago {
   @@index([pagadoEn])
   @@index([estado])
   @@index([cobradoPorId])
+  @@index([libro])
 }
 
 // Líneas del recibo. Sustituye al modelo Cuota.

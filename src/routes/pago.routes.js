@@ -3,6 +3,7 @@ import prisma from "../lib/prisma.js";
 import { verifyToken } from "../middleware/auth.middleware.js";
 import { checkRole } from "../middleware/role.middleware.js";
 import { auditar } from "../lib/audit.js";
+import { reportePDF } from "../lib/pdf.js";
 
 const router = express.Router();
 
@@ -14,6 +15,24 @@ const router = express.Router();
  * Un Pago ES el recibo: lleva el folio consecutivo y sus líneas
  * viven en DetallePago. Un pago nunca se borra, se cancela.
  */
+
+/**
+ * "María Fernanda López" → "MFL". Si el cajero no escribe sus iniciales,
+ * se toman de su nombre: el recibo físico siempre las lleva.
+ */
+function inicialesDe(nombre) {
+  if (!nombre) return null;
+
+  const iniciales = String(nombre)
+    .trim()
+    .split(/\s+/)
+    .slice(0, 3)
+    .map((p) => p[0])
+    .join("")
+    .toUpperCase();
+
+  return iniciales || null;
+}
 
 // ==========================================
 // 💰 COBRAR — genera recibo con folio
@@ -28,7 +47,8 @@ router.post(
   checkRole(["ADMIN", "CAJA"]),
   async (req, res) => {
     try {
-      const { alumnoId, metodo, referencia, conceptos } = req.body;
+      const { alumnoId, metodo, referencia, conceptos, libro, iniciales } =
+        req.body;
 
       if (!alumnoId || !Array.isArray(conceptos) || conceptos.length === 0) {
         return res.status(400).json({
@@ -86,6 +106,14 @@ router.post(
             total,
             metodo: metodo || "EFECTIVO",
             referencia: referencia ?? null,
+            // 🔥 Libro físico e iniciales de quien cobra: así el recibo
+            // digital se empata con el talonario de papel.
+            libro: libro ? String(libro).trim() : null,
+            iniciales: iniciales
+              ? String(iniciales).trim().toUpperCase()
+              : iniciales === ""
+              ? null
+              : inicialesDe(req.user.name),
             cobradoPorId: req.user.id,
             detalles: { create: lineas },
           },
@@ -131,6 +159,7 @@ router.post(
         entidadId: pago.id,
         despues: {
           folio: pago.folio,
+          libro: pago.libro,
           alumnoId: pago.alumnoId,
           total: pago.total,
           metodo: pago.metodo,
@@ -166,7 +195,46 @@ router.get(
       const page = Math.max(1, Number(req.query.page) || 1);
       const perPage = Math.min(100, Number(req.query.perPage) || 50);
 
-      const where = req.query.estado ? { estado: req.query.estado } : {};
+      // 🔎 El historial se busca como se busca en el archivo físico:
+      // por folio, por libro, por alumno o por rango de fechas.
+      const texto = (req.query.search || "").trim();
+
+      const folioBuscado = Number(texto);
+
+      const where = {
+        ...(req.query.estado ? { estado: req.query.estado } : {}),
+        ...(req.query.libro ? { libro: req.query.libro } : {}),
+        ...(req.query.folio ? { folio: Number(req.query.folio) } : {}),
+        ...(req.query.desde || req.query.hasta
+          ? {
+              pagadoEn: {
+                ...(req.query.desde
+                  ? { gte: new Date(`${req.query.desde}T00:00:00`) }
+                  : {}),
+                ...(req.query.hasta
+                  ? { lte: new Date(`${req.query.hasta}T23:59:59.999`) }
+                  : {}),
+              },
+            }
+          : {}),
+        ...(texto
+          ? {
+              OR: [
+                ...(Number.isInteger(folioBuscado) && texto !== ""
+                  ? [{ folio: folioBuscado }]
+                  : []),
+                { libro: { contains: texto, mode: "insensitive" } },
+                { iniciales: { contains: texto, mode: "insensitive" } },
+                { alumno: { matricula: { contains: texto, mode: "insensitive" } } },
+                {
+                  alumno: {
+                    user: { name: { contains: texto, mode: "insensitive" } },
+                  },
+                },
+              ],
+            }
+          : {}),
+      };
 
       const [pagos, total] = await Promise.all([
         prisma.pago.findMany({
@@ -193,6 +261,128 @@ router.get(
       res.status(500).json({
         success: false,
         message: "Error al obtener pagos",
+      });
+    }
+  }
+);
+
+// ==========================================
+// 📖 LIBRO DE RECIBOS
+// El historial como se lleva en papel: folio, libro, iniciales y fecha.
+// ?formato=pdf lo descarga para archivar o cotejar.
+// ==========================================
+router.get(
+  "/libro",
+  verifyToken,
+  checkRole(["ADMIN", "CAJA", "DIRECTOR"]),
+  async (req, res) => {
+    try {
+      const where = {
+        ...(req.query.libro ? { libro: req.query.libro } : {}),
+        ...(req.query.estado ? { estado: req.query.estado } : {}),
+        ...(req.query.desde || req.query.hasta
+          ? {
+              pagadoEn: {
+                ...(req.query.desde
+                  ? { gte: new Date(`${req.query.desde}T00:00:00`) }
+                  : {}),
+                ...(req.query.hasta
+                  ? { lte: new Date(`${req.query.hasta}T23:59:59.999`) }
+                  : {}),
+              },
+            }
+          : {}),
+        ...(req.query.folioDesde || req.query.folioHasta
+          ? {
+              folio: {
+                ...(req.query.folioDesde
+                  ? { gte: Number(req.query.folioDesde) }
+                  : {}),
+                ...(req.query.folioHasta
+                  ? { lte: Number(req.query.folioHasta) }
+                  : {}),
+              },
+            }
+          : {}),
+      };
+
+      const pagos = await prisma.pago.findMany({
+        where,
+        include: {
+          alumno: { include: { user: true } },
+          detalles: { include: { concepto: true } },
+        },
+        // El libro se lee en orden de folio, como el talonario.
+        orderBy: { folio: "asc" },
+        take: 2000,
+      });
+
+      const filas = pagos.map((p) => ({
+        folio: p.folio,
+        libro: p.libro || "—",
+        iniciales: p.iniciales || "—",
+        fecha: p.pagadoEn ? new Date(p.pagadoEn).toLocaleDateString("es-MX") : "—",
+        matricula: p.alumno?.matricula ?? "",
+        alumno: p.alumno?.user?.name ?? "",
+        concepto:
+          p.detalles.map((d) => d.concepto?.nombre).filter(Boolean).join(", ") ||
+          "—",
+        total: Number(p.total ?? 0).toFixed(2),
+        estado: p.estado === "CANCELADO" ? "CANCELADO" : "PAGADO",
+      }));
+
+      const total = pagos
+        .filter((p) => p.estado !== "CANCELADO")
+        .reduce((acc, p) => acc + Number(p.total ?? 0), 0);
+
+      const meta = {
+        recibos: filas.length,
+        total,
+        libro: req.query.libro || null,
+        desde: req.query.desde || null,
+        hasta: req.query.hasta || null,
+      };
+
+      if (req.query.formato === "pdf") {
+        const rango =
+          filas.length > 0
+            ? `Folios ${filas[0].folio} al ${filas[filas.length - 1].folio}`
+            : "Sin recibos";
+
+        return reportePDF(res, {
+          nombreArchivo: `libro-de-recibos${req.query.libro ? `-${req.query.libro}` : ""}`,
+          titulo: "Libro de recibos",
+          subtitulo: [
+            req.query.libro ? `Libro ${req.query.libro}` : null,
+            rango,
+            `${filas.length} recibo(s)`,
+            `Total $${total.toFixed(2)}`,
+          ]
+            .filter(Boolean)
+            .join(" · "),
+          horizontal: true,
+          columnas: [
+            { id: "folio", label: "Folio", ancho: 0.8 },
+            { id: "libro", label: "Libro", ancho: 0.7 },
+            { id: "iniciales", label: "Iniciales", ancho: 0.8 },
+            { id: "fecha", label: "Fecha", ancho: 1 },
+            { id: "matricula", label: "Matrícula", ancho: 1.1 },
+            { id: "alumno", label: "Alumno", ancho: 2.6 },
+            { id: "concepto", label: "Concepto", ancho: 2.2 },
+            { id: "total", label: "Importe", ancho: 0.9, alinear: "right" },
+            { id: "estado", label: "Estado", ancho: 0.9 },
+          ],
+          filas,
+        });
+      }
+
+      res.json({ success: true, data: filas, meta });
+    } catch (error) {
+      console.error("ERROR LIBRO DE RECIBOS:", error);
+
+      res.status(500).json({
+        success: false,
+        message: "Error al generar el libro de recibos",
       });
     }
   }

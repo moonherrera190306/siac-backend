@@ -3,6 +3,7 @@ import prisma from "../lib/prisma.js";
 
 import { verifyToken } from "../middleware/auth.middleware.js";
 import { checkRole } from "../middleware/role.middleware.js";
+import { puedeRegistrar, TOLERANCIA_MINUTOS } from "../lib/tolerancia.js";
 
 const router = express.Router();
 
@@ -229,7 +230,49 @@ router.post(
 
       const fechaClase = new Date(fecha);
 
+      /**
+       * ⏱️ TOLERANCIA
+       *
+       * Para el docente el registro solo vale si lo hace a la hora de su
+       * clase: esa es la parte de control de asistencia de la bitácora.
+       * Dirección y administración capturan sin restricción, porque son
+       * quienes corrigen los casos que el maestro no alcanzó a registrar.
+       */
+      let horarioResuelto = horarioId;
+      let minutosRetardo = null;
+
+      if (req.user.role === "MAESTRO") {
+        // Si ya registró esta misma clase, se le permite corregirla el
+        // mismo día sin volver a pedir la ventana.
+        const yaRegistrada = await prisma.clase.findFirst({
+          where: { asignacionId, fecha: fechaClase, registrada: true },
+        });
+
+        if (!yaRegistrada) {
+          const ventana = await puedeRegistrar({
+            asignacionId,
+            horarioId,
+            fecha: fechaClase,
+          });
+
+          if (!ventana.ok) {
+            return res.status(403).json({
+              success: false,
+              message: ventana.motivo,
+              toleranciaMinutos: TOLERANCIA_MINUTOS,
+            });
+          }
+
+          horarioResuelto = ventana.horarioId;
+          minutosRetardo = ventana.minutosRetardo;
+        } else {
+          horarioResuelto = yaRegistrada.horarioId;
+          minutosRetardo = yaRegistrada.minutosRetardo;
+        }
+      }
+
       const bitacora = {
+        minutosRetardo,
         tema: tema ?? null,
         actividad: actividad ?? null,
         observaciones: observaciones ?? null,
@@ -245,13 +288,13 @@ router.post(
           asignacionId_fecha_horarioId: {
             asignacionId,
             fecha: fechaClase,
-            horarioId,
+            horarioId: horarioResuelto ?? null,
           },
         },
         update: bitacora,
         create: {
           asignacionId,
-          horarioId,
+          horarioId: horarioResuelto ?? null,
           fecha: fechaClase,
           createdById: req.user.id,
           ...bitacora,
@@ -313,6 +356,236 @@ router.post(
       res.status(500).json({
         success: false,
         message: "Error al registrar la asistencia",
+        error: error.message,
+      });
+    }
+  }
+);
+
+/* =========================================
+   🔢 CAPTURA DIRECTA POR NÚMERO DE CLASES
+   El docente dice cuántas clases dio en el mes y cuántas asistió cada
+   alumno; el sistema saca las faltas y el porcentaje. Es el formato que
+   ya usaban en papel y no obliga a pasar lista sesión por sesión.
+========================================= */
+
+/** Precarga: alumnos del grupo con lo ya capturado en ese mes. */
+router.get(
+  "/directa/:asignacionId",
+  verifyToken,
+  checkRole(["MAESTRO", "ADMIN", "DIRECTOR"]),
+  async (req, res) => {
+    try {
+      const permiso = await asignacionPropia(req.user, req.params.asignacionId);
+
+      if (!permiso.ok) {
+        return res.status(403).json({ success: false, message: permiso.motivo });
+      }
+
+      const { asignacion } = permiso;
+
+      const mes = Math.min(4, Math.max(1, Number(req.query.mes) || 1));
+
+      const [alumnos, capturado] = await Promise.all([
+        prisma.alumno.findMany({
+          where: { grupoId: asignacion.grupoId, activo: true },
+          include: { user: true },
+          orderBy: { matricula: "asc" },
+        }),
+        prisma.asistenciaMensual.findMany({
+          where: {
+            materiaId: asignacion.materiaId,
+            cicloEscolarId: asignacion.cicloEscolarId,
+          },
+        }),
+      ]);
+
+      const porAlumno = new Map(capturado.map((c) => [c.alumnoId, c]));
+
+      const data = alumnos.map((a) => {
+        const c = porAlumno.get(a.id);
+
+        return {
+          alumnoId: a.id,
+          matricula: a.matricula,
+          nombre: a.user?.name ?? "",
+          asistencias: c?.[`asisMes${mes}`] ?? 0,
+          faltas: c?.[`faltasMes${mes}`] ?? 0,
+          porcentaje: c?.porcentaje ?? null,
+        };
+      });
+
+      // Todas las filas del mes suelen traer el mismo total de clases.
+      const clasesImpartidas = data.length
+        ? Math.max(...data.map((d) => d.asistencias + d.faltas))
+        : 0;
+
+      res.json({
+        success: true,
+        data: {
+          asignacion: {
+            id: asignacion.id,
+            materia: asignacion.materia?.nombre,
+            grupo: asignacion.grupo?.nombre,
+          },
+          mes,
+          clasesImpartidas,
+          alumnos: data,
+        },
+      });
+    } catch (error) {
+      console.error("🔥 ERROR PRECARGA DIRECTA:", error);
+
+      res.status(500).json({
+        success: false,
+        message: "Error al cargar la captura mensual",
+      });
+    }
+  }
+);
+
+/**
+ * Body: {
+ *   asignacionId, mes (1-4), clasesImpartidas,
+ *   alumnos: [{ alumnoId, asistencias, faltas? }]
+ * }
+ */
+router.post(
+  "/directa",
+  verifyToken,
+  checkRole(["MAESTRO", "ADMIN", "DIRECTOR"]),
+  async (req, res) => {
+    try {
+      const { asignacionId, mes, clasesImpartidas, alumnos } = req.body;
+
+      const numeroMes = Math.min(4, Math.max(1, Number(mes) || 1));
+
+      const totalClases = Number(clasesImpartidas);
+
+      if (!asignacionId || !Number.isFinite(totalClases) || totalClases < 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Indica la asignación y cuántas clases impartiste",
+        });
+      }
+
+      if (!Array.isArray(alumnos) || alumnos.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: "No hay alumnos que capturar",
+        });
+      }
+
+      const permiso = await asignacionPropia(req.user, asignacionId);
+
+      if (!permiso.ok) {
+        return res.status(403).json({ success: false, message: permiso.motivo });
+      }
+
+      const { asignacion } = permiso;
+
+      const delGrupo = await prisma.alumno.findMany({
+        where: { grupoId: asignacion.grupoId },
+        select: { id: true },
+      });
+
+      const permitidos = new Set(delGrupo.map((a) => a.id));
+
+      const operaciones = [];
+
+      for (const a of alumnos) {
+        if (!permitidos.has(a.alumnoId)) {
+          return res.status(400).json({
+            success: false,
+            message: "Hay un alumno que no pertenece a este grupo",
+          });
+        }
+
+        const asistio = Math.max(0, Math.min(totalClases, Number(a.asistencias) || 0));
+
+        // Las faltas se deducen salvo que el docente las capture aparte.
+        const falto =
+          a.faltas === undefined || a.faltas === null || a.faltas === ""
+            ? totalClases - asistio
+            : Math.max(0, Number(a.faltas) || 0);
+
+        const previo = await prisma.asistenciaMensual.findUnique({
+          where: {
+            alumnoId_materiaId_cicloEscolarId: {
+              alumnoId: a.alumnoId,
+              materiaId: asignacion.materiaId,
+              cicloEscolarId: asignacion.cicloEscolarId,
+            },
+          },
+        });
+
+        const campos = {
+          ...(previo ?? {}),
+          [`asisMes${numeroMes}`]: asistio,
+          [`faltasMes${numeroMes}`]: falto,
+        };
+
+        const asistidas =
+          (campos.asisMes1 || 0) +
+          (campos.asisMes2 || 0) +
+          (campos.asisMes3 || 0) +
+          (campos.asisMes4 || 0);
+
+        const faltas =
+          (campos.faltasMes1 || 0) +
+          (campos.faltasMes2 || 0) +
+          (campos.faltasMes3 || 0) +
+          (campos.faltasMes4 || 0);
+
+        const suma = asistidas + faltas;
+
+        const porcentaje =
+          suma === 0 ? null : Number(((asistidas / suma) * 100).toFixed(2));
+
+        const datos = {
+          asisMes1: campos.asisMes1 || 0,
+          asisMes2: campos.asisMes2 || 0,
+          asisMes3: campos.asisMes3 || 0,
+          asisMes4: campos.asisMes4 || 0,
+          faltasMes1: campos.faltasMes1 || 0,
+          faltasMes2: campos.faltasMes2 || 0,
+          faltasMes3: campos.faltasMes3 || 0,
+          faltasMes4: campos.faltasMes4 || 0,
+          porcentaje,
+        };
+
+        operaciones.push(
+          prisma.asistenciaMensual.upsert({
+            where: {
+              alumnoId_materiaId_cicloEscolarId: {
+                alumnoId: a.alumnoId,
+                materiaId: asignacion.materiaId,
+                cicloEscolarId: asignacion.cicloEscolarId,
+              },
+            },
+            update: datos,
+            create: {
+              alumnoId: a.alumnoId,
+              materiaId: asignacion.materiaId,
+              cicloEscolarId: asignacion.cicloEscolarId,
+              ...datos,
+            },
+          })
+        );
+      }
+
+      await prisma.$transaction(operaciones);
+
+      res.status(201).json({
+        success: true,
+        message: `Asistencia del mes ${numeroMes} guardada sobre ${totalClases} clase(s) impartida(s)`,
+      });
+    } catch (error) {
+      console.error("🔥 ERROR CAPTURA DIRECTA:", error);
+
+      res.status(500).json({
+        success: false,
+        message: "Error al guardar la asistencia por número de clases",
         error: error.message,
       });
     }

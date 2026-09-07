@@ -233,6 +233,49 @@ router.get(
 
       const texto = (req.query.search || "").trim();
 
+      /**
+       * 🔎 BÚSQUEDA DIRIGIDA
+       *
+       * El buscador general seguía existiendo, pero en ventanilla se
+       * busca de dos formas concretas: por matrícula (o lector de código)
+       * y por apellido. `campo` decide dónde se busca; sin él se busca
+       * en todo, como antes.
+       */
+      const campo = (req.query.campo || "todos").toLowerCase();
+
+      const filtroTexto = () => {
+        if (!texto) return {};
+
+        if (campo === "matricula") {
+          return { matricula: { contains: texto, mode: "insensitive" } };
+        }
+
+        // El nombre completo vive en User.name: buscar el apellido dentro
+        // de esa cadena funciona igual con "APELLIDO NOMBRE" o "Nombre Apellido".
+        if (campo === "apellido" || campo === "nombre") {
+          return { user: { name: { contains: texto, mode: "insensitive" } } };
+        }
+
+        return {
+          OR: [
+            { matricula: { contains: texto, mode: "insensitive" } },
+            { curp: { contains: texto, mode: "insensitive" } },
+            { user: { name: { contains: texto, mode: "insensitive" } } },
+            { user: { email: { contains: texto, mode: "insensitive" } } },
+          ],
+        };
+      };
+
+      // Listas para imprimir: por matrícula o alfabético, no por alta.
+      const ORDENES = {
+        matricula: { matricula: "asc" },
+        nombre: { user: { name: "asc" } },
+        apellido: { user: { name: "asc" } },
+        reciente: { createdAt: "desc" },
+      };
+
+      const orderBy = ORDENES[req.query.orden] || ORDENES.reciente;
+
       // 🔥 Sin paginación esto devolvía el padrón completo en cada carga.
       const where = {
         ...(req.query.grupoId ? { grupoId: req.query.grupoId } : {}),
@@ -240,16 +283,7 @@ router.get(
         ...(req.query.activo !== undefined
           ? { activo: req.query.activo === "true" }
           : {}),
-        ...(texto
-          ? {
-              OR: [
-                { matricula: { contains: texto, mode: "insensitive" } },
-                { curp: { contains: texto, mode: "insensitive" } },
-                { user: { name: { contains: texto, mode: "insensitive" } } },
-                { user: { email: { contains: texto, mode: "insensitive" } } },
-              ],
-            }
-          : {}),
+        ...filtroTexto(),
       };
 
       const [alumnos, total] = await Promise.all([
@@ -262,7 +296,7 @@ router.get(
             carrera: true,
             trayectoria: true,
           },
-          orderBy: { createdAt: "desc" },
+          orderBy,
           skip: (page - 1) * perPage,
           take: perPage,
         }),
@@ -280,6 +314,55 @@ router.get(
         success: false,
         message: "Error al obtener alumnos",
         error: error.message,
+      });
+    }
+  }
+);
+
+/* =========================================
+   🔫 BUSCAR POR MATRÍCULA EXACTA (lector de código)
+   Va ANTES de "/:id": si no, Express toma la matrícula como id.
+========================================= */
+router.get(
+  "/matricula/:matricula",
+  verifyToken,
+  checkRole(["ADMIN", "SECRETARIA", "DIRECTOR", "CAJA"]),
+  async (req, res) => {
+    try {
+      // El lector agrega espacios y a veces salto de línea al final.
+      const matricula = String(req.params.matricula || "").trim();
+
+      if (!matricula) {
+        return res.status(400).json({
+          success: false,
+          message: "Matrícula vacía",
+        });
+      }
+
+      const alumno = await prisma.alumno.findUnique({
+        where: { matricula },
+        include: {
+          user: true,
+          grupo: { include: { turno: true, semestre: true } },
+          carrera: true,
+          programa: true,
+        },
+      });
+
+      if (!alumno) {
+        return res.status(404).json({
+          success: false,
+          message: `No hay ningún alumno con la matrícula ${matricula}`,
+        });
+      }
+
+      res.json({ success: true, data: alumno });
+    } catch (error) {
+      console.error("ERROR GET ALUMNO POR MATRÍCULA:", error);
+
+      res.status(500).json({
+        success: false,
+        message: "Error al buscar por matrícula",
       });
     }
   }

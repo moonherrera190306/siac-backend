@@ -50,14 +50,15 @@ export const verifyToken = async (req, res, next) => {
     // hay que comprobarlo contra la base.
     const user = await prisma.user.findUnique({
       where: { id: decoded.id },
-      select: { id: true, activo: true, role: true },
+      select: { id: true, activo: true, role: true, name: true },
     });
 
     if (!user || !user.activo) {
       return res.status(401).json({ message: "Cuenta desactivada" });
     }
 
-    req.user = { ...decoded, role: user.role };
+    // `name` se usa, por ejemplo, para las iniciales del cajero en el recibo.
+    req.user = { ...decoded, role: user.role, name: user.name };
 
     next();
   } catch (error) {
