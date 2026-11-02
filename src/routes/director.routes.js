@@ -150,6 +150,121 @@ router.get("/calificaciones", async (req, res) => {
 });
 
 /* =========================
+   ✅ CAPTURA DE CALIFICACIONES POR MAESTRO
+   ¿Qué maestro ya subió calificaciones y cuál no?
+   ?cicloEscolarId=  (por defecto el ciclo activo)
+   ?columna=PP|SP|EF|O|ND  (sin columna: cualquier columna capturada)
+========================= */
+const CAMPO_COLUMNA = {
+  PP: "primerParcial",
+  SP: "segundoParcial",
+  EF: "examenFinal",
+  O: "notaFinal",
+  ND: "notaDefinitiva",
+};
+
+router.get("/captura-calificaciones", async (req, res) => {
+  try {
+    const columna = String(req.query.columna || "").toUpperCase();
+    const campo = CAMPO_COLUMNA[columna] || null;
+
+    const asignaciones = await prisma.asignacionMateria.findMany({
+      where: req.query.cicloEscolarId
+        ? { cicloEscolarId: req.query.cicloEscolarId }
+        : { cicloEscolar: { activo: true } },
+      include: {
+        docente: { include: { user: { select: { name: true, email: true } } } },
+        materia: { select: { id: true, nombre: true } },
+        grupo: {
+          select: {
+            id: true,
+            nombre: true,
+            alumnos: { where: { activo: true }, select: { id: true } },
+          },
+        },
+        cicloEscolar: { select: { id: true, nombre: true } },
+      },
+    });
+
+    const calificaciones = asignaciones.length
+      ? await prisma.calificacion.findMany({
+          where: {
+            cicloEscolarId: { in: [...new Set(asignaciones.map((a) => a.cicloEscolarId))] },
+            materiaId: { in: [...new Set(asignaciones.map((a) => a.materiaId))] },
+          },
+          select: {
+            alumnoId: true,
+            materiaId: true,
+            cicloEscolarId: true,
+            primerParcial: true,
+            segundoParcial: true,
+            examenFinal: true,
+            notaFinal: true,
+            notaDefinitiva: true,
+            updatedAt: true,
+          },
+        })
+      : [];
+
+    const capturada = (c) =>
+      campo
+        ? Boolean(String(c[campo] ?? "").trim())
+        : Object.values(CAMPO_COLUMNA).some((k) => String(c[k] ?? "").trim());
+
+    const porClave = new Map(
+      calificaciones.map((c) => [`${c.cicloEscolarId}|${c.materiaId}|${c.alumnoId}`, c])
+    );
+
+    const data = asignaciones
+      .map((a) => {
+        const alumnos = a.grupo?.alumnos ?? [];
+        let capturados = 0;
+        let ultima = null;
+
+        for (const al of alumnos) {
+          const c = porClave.get(`${a.cicloEscolarId}|${a.materiaId}|${al.id}`);
+          if (c && capturada(c)) {
+            capturados += 1;
+            if (!ultima || c.updatedAt > ultima) ultima = c.updatedAt;
+          }
+        }
+
+        const total = alumnos.length;
+
+        return {
+          asignacionId: a.id,
+          docenteId: a.docenteId,
+          docente: a.docente?.nombre || a.docente?.user?.name || "—",
+          materia: a.materia?.nombre ?? "—",
+          grupo: a.grupo?.nombre ?? "—",
+          ciclo: a.cicloEscolar?.nombre ?? null,
+          totalAlumnos: total,
+          capturados,
+          ultimaCaptura: ultima,
+          estado:
+            total === 0
+              ? "SIN_ALUMNOS"
+              : capturados === 0
+              ? "SIN_CAPTURA"
+              : capturados < total
+              ? "PARCIAL"
+              : "COMPLETA",
+        };
+      })
+      .sort((x, y) => x.docente.localeCompare(y.docente) || x.grupo.localeCompare(y.grupo));
+
+    return res.json({ success: true, data });
+  } catch (error) {
+    console.error("ERROR CAPTURA CALIFICACIONES:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Error obteniendo el avance de captura",
+    });
+  }
+});
+
+/* =========================
    📅 ASISTENCIAS POR GRUPO
 ========================= */
 router.get("/asistencias", async (req, res) => {

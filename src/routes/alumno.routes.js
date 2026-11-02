@@ -252,15 +252,24 @@ router.get(
 
         // El nombre completo vive en User.name: buscar el apellido dentro
         // de esa cadena funciona igual con "APELLIDO NOMBRE" o "Nombre Apellido".
+        // Cada palabra debe aparecer, en cualquier orden:
+        // "perez juan" encuentra a "Juan Pérez López".
+        const porPalabras = {
+          AND: texto
+            .split(/\s+/)
+            .filter(Boolean)
+            .map((p) => ({ user: { name: { contains: p, mode: "insensitive" } } })),
+        };
+
         if (campo === "apellido" || campo === "nombre") {
-          return { user: { name: { contains: texto, mode: "insensitive" } } };
+          return porPalabras;
         }
 
         return {
           OR: [
             { matricula: { contains: texto, mode: "insensitive" } },
             { curp: { contains: texto, mode: "insensitive" } },
-            { user: { name: { contains: texto, mode: "insensitive" } } },
+            porPalabras,
             { user: { email: { contains: texto, mode: "insensitive" } } },
           ],
         };
