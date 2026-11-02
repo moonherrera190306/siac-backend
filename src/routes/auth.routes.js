@@ -89,6 +89,54 @@ function firmarToken(user) {
   );
 }
 
+/* =========================================
+   🏫 ACCESO POR NIVEL (PREPARATORIA / UNIVERSIDAD)
+   Alumnos y maestros entran por el login de su nivel.
+   El resto de los roles ve ambos niveles y entra por cualquiera.
+========================================= */
+
+const NIVELES = ["PREPARATORIA", "UNIVERSIDAD"];
+const ROLES_CON_NIVEL = ["ALUMNO", "MAESTRO"];
+
+const NOMBRE_NIVEL = { PREPARATORIA: "Preparatoria", UNIVERSIDAD: "Universidad" };
+
+const selNivel = { select: { nivelAcademico: { select: { clave: true } } } };
+const selCarrera = { select: { programa: selNivel } };
+const selGrupo = { select: { semestre: { select: { carrera: selCarrera } } } };
+
+const claveDePrograma = (p) => p?.nivelAcademico?.clave;
+
+async function nivelesDelUsuario(user) {
+  const niveles = new Set();
+
+  if (user.role === "ALUMNO" && user.alumno) {
+    const a = await prisma.alumno.findUnique({
+      where: { id: user.alumno.id },
+      select: { programa: selNivel, carrera: selCarrera, grupo: selGrupo },
+    });
+
+    [
+      claveDePrograma(a?.programa),
+      claveDePrograma(a?.carrera?.programa),
+      claveDePrograma(a?.grupo?.semestre?.carrera?.programa),
+    ].forEach((c) => c && niveles.add(c));
+  }
+
+  if (user.role === "MAESTRO") {
+    const asignaciones = await prisma.asignacionMateria.findMany({
+      where: { docente: { userId: user.id } },
+      select: { grupo: selGrupo },
+    });
+
+    asignaciones.forEach(({ grupo }) => {
+      const c = claveDePrograma(grupo?.semestre?.carrera?.programa);
+      if (c) niveles.add(c);
+    });
+  }
+
+  return niveles;
+}
+
 function datosPublicos(user) {
   return {
     id: user.id,
@@ -105,7 +153,7 @@ function datosPublicos(user) {
 // =============================
 router.post("/login", async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, nivel } = req.body;
 
     if (!email || !password) {
       return res.status(400).json({
@@ -155,6 +203,22 @@ router.post("/login", async (req, res) => {
         success: false,
         message: "Usuario desactivado",
       });
+    }
+
+    // 🏫 Login por nivel. Sin `nivel` se conserva el comportamiento anterior.
+    if (nivel && NIVELES.includes(nivel) && ROLES_CON_NIVEL.includes(user.role)) {
+      const niveles = await nivelesDelUsuario(user);
+
+      // Sin nivel determinable (alumno sin programa, maestro sin
+      // asignaciones) no se bloquea: no hay con qué decidir.
+      if (niveles.size > 0 && !niveles.has(nivel)) {
+        const otro = [...niveles][0];
+
+        return res.status(403).json({
+          success: false,
+          message: `Tu cuenta es de ${NOMBRE_NIVEL[otro] ?? otro}. Entra por el acceso de ${NOMBRE_NIVEL[otro] ?? otro}.`,
+        });
+      }
     }
 
     limpiarIntentos(clave);
