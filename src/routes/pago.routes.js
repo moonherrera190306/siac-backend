@@ -4,6 +4,7 @@ import { verifyToken } from "../middleware/auth.middleware.js";
 import { checkRole } from "../middleware/role.middleware.js";
 import { auditar } from "../lib/audit.js";
 import { reportePDF } from "../lib/pdf.js";
+import { buscarExalumnos, obtenerExalumno } from "../lib/archivo.js";
 
 const router = express.Router();
 
@@ -35,9 +36,29 @@ function inicialesDe(nombre) {
 }
 
 // ==========================================
+// 🗄️ BUSCAR EXALUMNOS en el Archivo histórico
+// GET /api/pagos/exalumnos?q=nombre o matrícula
+// ==========================================
+router.get(
+  "/exalumnos",
+  verifyToken,
+  checkRole(["ADMIN", "CAJA"]),
+  async (req, res) => {
+    try {
+      const q = String(req.query.q || "").trim();
+      const data = q.length < 2 ? [] : await buscarExalumnos(q);
+      res.json({ success: true, data: data ?? [] });
+    } catch (error) {
+      console.error(error);
+      res.status(502).json({ success: false, message: error.message });
+    }
+  }
+);
+
+// ==========================================
 // 💰 COBRAR — genera recibo con folio
 // Body: {
-//   alumnoId, metodo, referencia,
+//   alumnoId | exalumnoId (id del Archivo histórico), metodo, referencia,
 //   conceptos: [{ conceptoPagoId, descripcion, cantidad, monto, adeudoId }]
 // }
 // ==========================================
@@ -47,23 +68,37 @@ router.post(
   checkRole(["ADMIN", "CAJA"]),
   async (req, res) => {
     try {
-      const { alumnoId, metodo, referencia, conceptos, libro, iniciales } =
+      const { alumnoId, exalumnoId, metodo, referencia, conceptos, libro, iniciales } =
         req.body;
 
-      if (!alumnoId || !Array.isArray(conceptos) || conceptos.length === 0) {
+      if ((!alumnoId && !exalumnoId) || !Array.isArray(conceptos) || conceptos.length === 0) {
         return res.status(400).json({
           success: false,
           message: "Se requiere el alumno y al menos un concepto",
         });
       }
 
-      const alumno = await prisma.alumno.findUnique({ where: { id: alumnoId } });
+      // 🗄️ Exalumno: los datos se toman del archivo, nunca del cliente.
+      let exalumno = null;
 
-      if (!alumno) {
-        return res.status(404).json({
-          success: false,
-          message: "Alumno no encontrado",
-        });
+      if (!alumnoId) {
+        exalumno = await obtenerExalumno(exalumnoId);
+
+        if (!exalumno) {
+          return res.status(404).json({
+            success: false,
+            message: "Exalumno no encontrado en el Archivo histórico",
+          });
+        }
+      } else {
+        const alumno = await prisma.alumno.findUnique({ where: { id: alumnoId } });
+
+        if (!alumno) {
+          return res.status(404).json({
+            success: false,
+            message: "Alumno no encontrado",
+          });
+        }
       }
 
       const ids = conceptos.map((c) => c.conceptoPagoId);
@@ -102,7 +137,10 @@ router.post(
       const pago = await prisma.$transaction(async (tx) => {
         const creado = await tx.pago.create({
           data: {
-            alumnoId,
+            alumnoId: alumnoId || null,
+            exalumnoArchivoId: exalumno ? exalumno.id : null,
+            exalumnoMatricula: exalumno ? exalumno.matricula : null,
+            exalumnoNombre: exalumno ? exalumno.nombre : null,
             total,
             metodo: metodo || "EFECTIVO",
             referencia: referencia ?? null,
@@ -124,8 +162,9 @@ router.post(
           },
         });
 
-        // Puente caja → secretaría.
-        for (const detalle of creado.detalles) {
+        // Puente caja → secretaría. Solo alumnos activos: lo del
+        // exalumno se atiende desde el Archivo histórico.
+        for (const detalle of alumnoId ? creado.detalles : []) {
           if (detalle.concepto.generaTramite) {
             await tx.tramite.create({
               data: {
@@ -141,7 +180,7 @@ router.post(
         // Liquidación de adeudos indicados en la línea.
         const adeudoIds = conceptos.map((c) => c.adeudoId).filter(Boolean);
 
-        if (adeudoIds.length > 0) {
+        if (alumnoId && adeudoIds.length > 0) {
           await tx.adeudo.updateMany({
             where: { id: { in: adeudoIds }, alumnoId },
             data: { pagado: true, saldo: 0 },
@@ -161,6 +200,7 @@ router.post(
           folio: pago.folio,
           libro: pago.libro,
           alumnoId: pago.alumnoId,
+          exalumnoArchivoId: pago.exalumnoArchivoId,
           total: pago.total,
           metodo: pago.metodo,
           conceptos: pago.detalles.map((d) => d.concepto?.clave),
@@ -322,8 +362,8 @@ router.get(
         libro: p.libro || "—",
         iniciales: p.iniciales || "—",
         fecha: p.pagadoEn ? new Date(p.pagadoEn).toLocaleDateString("es-MX") : "—",
-        matricula: p.alumno?.matricula ?? "",
-        alumno: p.alumno?.user?.name ?? "",
+        matricula: p.alumno?.matricula ?? p.exalumnoMatricula ?? "",
+        alumno: p.alumno?.user?.name ?? (p.exalumnoNombre ? `${p.exalumnoNombre} (exalumno)` : ""),
         concepto:
           p.detalles.map((d) => d.concepto?.nombre).filter(Boolean).join(", ") ||
           "—",

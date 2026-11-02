@@ -316,6 +316,54 @@ router.post("/refresh", verifyToken, async (req, res) => {
 });
 
 // =============================
+// 🗄️ SSO → ARCHIVO HISTÓRICO
+// Token de 60 s para entrar a la app biblioteca sin otra contraseña.
+// =============================
+router.get(
+  "/sso-archivo",
+  verifyToken,
+  checkRole(["ADMIN", "DIRECTOR", "SECRETARIA"]),
+  async (req, res) => {
+    try {
+      const base = (process.env.ARCHIVO_URL || "").replace(/\/+$/, "");
+      const secreto = process.env.SSO_SIAC_SECRET;
+
+      if (!base || !secreto) {
+        return res.status(503).json({
+          success: false,
+          message: "El Archivo histórico no está configurado",
+        });
+      }
+
+      const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+
+      if (!user || !user.activo) {
+        return res.status(401).json({ success: false, message: "Sesión no válida" });
+      }
+
+      const token = jwt.sign(
+        { email: user.email, name: user.name, role: user.role },
+        secreto,
+        { expiresIn: "60s", audience: "archivo-historico", issuer: "siac", algorithm: "HS256" }
+      );
+
+      await auditar({
+        req,
+        usuarioId: user.id,
+        accion: "LOGIN",
+        entidad: "ArchivoHistorico",
+        entidadId: user.id,
+      });
+
+      res.json({ success: true, url: `${base}/sso?token=${encodeURIComponent(token)}` });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ success: false, message: "Error generando acceso" });
+    }
+  }
+);
+
+// =============================
 // 🚪 LOGOUT
 // =============================
 router.post("/logout", (req, res) => {

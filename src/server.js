@@ -35,6 +35,7 @@ import tramiteRoutes from "./routes/tramite.routes.js";
 import claseRoutes from "./routes/clase.routes.js";
 import observacionRoutes from "./routes/observacion.routes.js";
 import auditoriaRoutes from "./routes/auditoria.routes.js";
+import { alumnoVirtualExalumno } from "./lib/archivo.js";
 
 dotenv.config();
 
@@ -59,10 +60,10 @@ app.use(
 app.use(express.json());
 
 // 🔥 RUTAS API
-app.use("/api/admin", adminRoutes);
+app.use("/api/admin", alumnoVirtualExalumno, adminRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/alumnos", alumnoRoutes);
-app.use("/api/pagos", pagoRoutes);
+app.use("/api/pagos", alumnoVirtualExalumno, pagoRoutes);
 app.use("/api/programas", programaRoutes);
 app.use("/api/carreras", carreraRoutes);
 app.use("/api/semestres", semestreRoutes);
@@ -70,7 +71,7 @@ app.use("/api/grupos", grupoRoutes);
 app.use("/api/materias", materiaRoutes);
 app.use("/api/docentes", docenteRoutes);
 app.use("/api/calificaciones", calificacionRoutes);
-app.use("/api/reportes", reportesRoutes);
+app.use("/api/reportes", alumnoVirtualExalumno, reportesRoutes);
 app.use("/api/director", directorRoutes);
 app.use(
   "/api/documentos",

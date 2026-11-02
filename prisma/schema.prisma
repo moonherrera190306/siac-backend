@@ -911,9 +911,17 @@ model Pago {
   libro     String?
   iniciales String?
 
-  alumnoId String
+  // Alumno activo del SIAC, o bien un exalumno del Archivo histórico
+  // (app biblioteca-siac). Uno de los dos es obligatorio (CHECK en la BD).
+  alumnoId String?
 
-  alumno Alumno @relation(fields: [alumnoId], references: [id])
+  alumno Alumno? @relation(fields: [alumnoId], references: [id])
+
+  // 🗄️ Exalumno: se copia matrícula y nombre al cobrar para que el
+  // recibo no dependa de que el archivo esté disponible.
+  exalumnoArchivoId Int?
+  exalumnoMatricula String?
+  exalumnoNombre    String?
 
   total Float
 
@@ -940,6 +948,7 @@ model Pago {
   updatedAt DateTime @updatedAt
 
   @@index([alumnoId])
+  @@index([exalumnoArchivoId])
   @@index([pagadoEn])
   @@index([estado])
   @@index([cobradoPorId])
