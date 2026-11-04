@@ -2,6 +2,7 @@ import express from "express";
 import prisma from "../lib/prisma.js";
 import { verifyToken } from "../middleware/auth.middleware.js";
 import { checkRole } from "../middleware/role.middleware.js";
+import { auditar } from "../lib/audit.js";
 import {
   ahoraEscolar,
   estadoVentana,
@@ -429,12 +430,30 @@ router.get(
         include: { _count: { select: { asistencias: true } } },
       });
 
+      // ✅ Visto bueno de dirección para ese día.
+      const vistos = await prisma.vistoBuenoDocente.findMany({
+        where: {
+          fecha: new Date(`${fechaISO}T00:00:00.000Z`),
+          horarioId: { in: horarios.map((h) => h.id) },
+        },
+      });
+
+      const validadores = await prisma.user.findMany({
+        where: { id: { in: [...new Set(vistos.map((v) => v.validadoPorId))] } },
+        select: { id: true, name: true },
+      });
+
       const esHoy = fechaISO === ahora.fechaISO;
 
       const data = horarios.map((h) => {
-        const clase = clases.find(
-          (c) => c.horarioId === h.id || c.asignacionId === h.asignacionId
-        );
+        // Primero la clase de ESTE bloque; si no, una de la misma materia
+        // sin bloque (registrada por dirección). Antes podía tomar la clase
+        // de otro bloque de la misma materia en el mismo día.
+        const clase =
+          clases.find((c) => c.horarioId === h.id) ||
+          clases.find((c) => !c.horarioId && c.asignacionId === h.asignacionId);
+
+        const visto = vistos.find((v) => v.horarioId === h.id);
 
         const ventana = estadoVentana(h.horaInicio, ahora);
 
@@ -466,6 +485,15 @@ router.get(
           tema: clase?.tema ?? null,
           incidencias: clase?.incidencias ?? null,
           alumnos: clase?._count?.asistencias ?? 0,
+          vistoBueno: visto
+            ? {
+                dictamen: visto.dictamen,
+                nota: visto.nota,
+                validadoEn: visto.validadoEn,
+                validadoPor:
+                  validadores.find((u) => u.id === visto.validadoPorId)?.name ?? null,
+              }
+            : null,
         };
       });
 
@@ -482,6 +510,7 @@ router.get(
             .length,
           tarde: data.filter((d) => d.estado === "REGISTRADA_TARDE").length,
           sinRegistro: data.filter((d) => d.estado === "SIN_REGISTRO").length,
+          validadas: data.filter((d) => d.vistoBueno).length,
         },
       });
     } catch (error) {
@@ -490,6 +519,98 @@ router.get(
       res.status(500).json({
         success: false,
         message: "Error al obtener el registro del día",
+      });
+    }
+  }
+);
+
+/* =========================================
+   ✅ VISTO BUENO DE ASISTENCIA DOCENTE
+   Body: { fecha: "YYYY-MM-DD",
+           items: [{ horarioId, dictamen, nota? }] }
+   dictamen: ASISTIO | RETARDO | FALTA | JUSTIFICADA
+========================================= */
+const DICTAMENES = ["ASISTIO", "RETARDO", "FALTA", "JUSTIFICADA"];
+
+router.post(
+  "/visto-bueno",
+  verifyToken,
+  checkRole(["ADMIN", "DIRECTOR"]),
+  async (req, res) => {
+    try {
+      const { fecha, items } = req.body;
+
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(fecha || ""))) {
+        return res.status(400).json({ success: false, message: "Fecha inválida" });
+      }
+
+      if (fecha > ahoraEscolar().fechaISO) {
+        return res.status(400).json({
+          success: false,
+          message: "No se puede dar visto bueno a un día que no ha pasado",
+        });
+      }
+
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ success: false, message: "Nada que validar" });
+      }
+
+      const malos = items.filter(
+        (i) => !i?.horarioId || !DICTAMENES.includes(i.dictamen)
+      );
+
+      if (malos.length) {
+        return res.status(400).json({
+          success: false,
+          message: "Cada renglón necesita su bloque y un dictamen válido",
+        });
+      }
+
+      const dia = new Date(`${fecha}T00:00:00.000Z`);
+
+      const guardados = await prisma.$transaction(
+        items.map((i) =>
+          prisma.vistoBuenoDocente.upsert({
+            where: { horarioId_fecha: { horarioId: i.horarioId, fecha: dia } },
+            create: {
+              horarioId: i.horarioId,
+              fecha: dia,
+              dictamen: i.dictamen,
+              nota: i.nota?.trim() || null,
+              validadoPorId: req.user.id,
+            },
+            update: {
+              dictamen: i.dictamen,
+              nota: i.nota?.trim() || null,
+              validadoPorId: req.user.id,
+              validadoEn: new Date(),
+            },
+          })
+        )
+      );
+
+      await auditar({
+        req,
+        accion: "ACTUALIZAR",
+        entidad: "VistoBuenoDocente",
+        entidadId: fecha,
+        despues: {
+          fecha,
+          items: items.map((i) => ({ horarioId: i.horarioId, dictamen: i.dictamen })),
+        },
+      });
+
+      res.json({
+        success: true,
+        message: `Visto bueno registrado (${guardados.length})`,
+        data: guardados,
+      });
+    } catch (error) {
+      console.error("ERROR VISTO BUENO:", error);
+
+      res.status(500).json({
+        success: false,
+        message: "Error al guardar el visto bueno",
       });
     }
   }

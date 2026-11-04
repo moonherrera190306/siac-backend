@@ -627,6 +627,7 @@ model Horario {
   aula String?
 
   clases Clase[]
+  vistosBuenos VistoBuenoDocente[]
 
   createdAt DateTime @default(now())
 
@@ -1161,4 +1162,41 @@ model AuditLog {
   @@index([entidad, entidadId])
   @@index([usuarioId])
   @@index([createdAt])
+}
+
+/**
+ * =========================================
+ * ✅ VISTO BUENO DE ASISTENCIA DOCENTE
+ * Dirección revisa cada bloque de horario del día y confirma
+ * si el maestro asistió. Va por horario+fecha (no por Clase)
+ * porque una falta no tiene Clase registrada.
+ * =========================================
+ */
+
+enum DictamenDocente {
+  ASISTIO
+  RETARDO
+  FALTA
+  JUSTIFICADA
+}
+
+model VistoBuenoDocente {
+  id String @id @default(uuid())
+
+  horarioId String
+  horario   Horario @relation(fields: [horarioId], references: [id], onDelete: Cascade)
+
+  // Medianoche UTC del día revisado.
+  fecha DateTime
+
+  dictamen DictamenDocente
+  nota     String?
+
+  validadoPorId String
+  validadoEn    DateTime @default(now())
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([horarioId, fecha])
+  @@index([fecha])
 }
