@@ -30,6 +30,8 @@ async function llamar(ruta) {
 export const buscarExalumnos = (q) =>
   llamar(`/api/siac/exalumnos?q=${encodeURIComponent(q)}`);
 
+export const obtenerResumenArchivo = () => llamar("/api/siac/resumen");
+
 export const obtenerExalumno = (id) =>
   llamar(`/api/siac/exalumnos?id=${encodeURIComponent(id)}`);
 

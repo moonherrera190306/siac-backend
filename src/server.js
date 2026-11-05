@@ -35,6 +35,7 @@ import tramiteRoutes from "./routes/tramite.routes.js";
 import claseRoutes from "./routes/clase.routes.js";
 import observacionRoutes from "./routes/observacion.routes.js";
 import auditoriaRoutes from "./routes/auditoria.routes.js";
+import archivoRoutes from "./routes/archivo.routes.js";
 import { alumnoVirtualExalumno } from "./lib/archivo.js";
 
 dotenv.config();
@@ -95,6 +96,7 @@ app.use("/api/tramites", tramiteRoutes);
 app.use("/api/clases", claseRoutes);
 app.use("/api/observaciones", observacionRoutes);
 app.use("/api/auditoria", auditoriaRoutes);
+app.use("/api/archivo", archivoRoutes);
 
 //app.use("/api/secretaria", secretariaRoutes);
 //app.use("/api/caja", cajaRoutes);

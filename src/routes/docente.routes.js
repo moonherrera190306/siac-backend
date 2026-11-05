@@ -238,11 +238,18 @@ router.get(
 
           include: {
 
+            // Solo el ciclo activo, igual que /grupos.
             asignaciones: {
+
+              where: {
+                cicloEscolar: { activo: true }
+              },
 
               include: {
                 materia: true,
-                grupo: true
+                grupo: {
+                  include: { _count: { select: { alumnos: true } } }
+                }
               }
 
             }
@@ -264,6 +271,10 @@ router.get(
 
       }
 
+      const gruposUnicos = [
+        ...new Map(docente.asignaciones.map((a) => [a.grupoId, a.grupo])).values(),
+      ];
+
       res.json({
 
         success: true,
@@ -273,8 +284,11 @@ router.get(
           materias:
             docente.asignaciones.length,
 
-          grupos:
-            docente.asignaciones.length,
+          totalGrupos:
+            gruposUnicos.length,
+
+          totalAlumnos:
+            gruposUnicos.reduce((n, g) => n + (g._count?.alumnos ?? 0), 0),
 
           asignaciones:
             docente.asignaciones

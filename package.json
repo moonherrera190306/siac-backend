@@ -13,7 +13,13 @@
     "test": "node --test \"tests/**/*.test.js\"",
     "test:watch": "node --test --watch \"tests/**/*.test.js\"",
     "demo": "node prisma/seed-demo.js",
-    "demo:limpiar": "node prisma/limpiar-demo.js"
+    "demo:limpiar": "node prisma/limpiar-demo.js",
+    "niveles": "node prisma/niveles-personal.js",
+    "prueba:marcar": "node prisma/marcar-prueba.js",
+    "asignar:docentes": "node prisma/asignar-docentes.js",
+    "claves:reiniciar": "node prisma/reiniciar-claves.js",
+    "inscribir:ciclo": "node prisma/pasar-semestre.js",
+    "horarios:prueba": "node prisma/horarios-prueba.js"
   },
   "dependencies": {
     "@prisma/client": "^6.0.0",

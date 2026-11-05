@@ -5,6 +5,7 @@ import { aCSV } from "../lib/csv.js";
 import { reportePDF } from "../lib/pdf.js";
 import { verifyToken } from "../middleware/auth.middleware.js";
 import { checkRole } from "../middleware/role.middleware.js";
+import { contexto as peticion } from "../lib/contexto.js";
 
 const router = express.Router();
 
@@ -97,6 +98,22 @@ async function asistenciaPorAlumno(cicloId) {
   return new Map(filas.map((f) => [f.id, num(f.asistencia)]));
 }
 
+/**
+ * 🏫 Las consultas en SQL crudo no pasan por el filtro de lib/prisma.js:
+ * si el usuario tiene nivel, se limita aquí a los grupos de ese nivel.
+ */
+function soloGruposDelNivel(columna) {
+  const nivel = peticion.getStore()?.nivel;
+  if (!nivel) return Prisma.empty;
+  return Prisma.sql`AND ${Prisma.raw(columna)} IN (
+    SELECT g2.id FROM "Grupo" g2
+    JOIN "Semestre" s2 ON s2.id = g2."semestreId"
+    JOIN "Carrera" ca2 ON ca2.id = s2."carreraId"
+    JOIN "Programa" p2 ON p2.id = ca2."programaId"
+    JOIN "NivelAcademico" n2 ON n2.id = p2."nivelAcademicoId"
+    WHERE n2.clave = ${nivel})`;
+}
+
 async function cicloDe(req) {
   return req.query.cicloEscolarId
     ? prisma.cicloEscolar.findUnique({ where: { id: req.query.cicloEscolarId } })
@@ -136,6 +153,7 @@ router.get(
           ON c."alumnoId" = a.id
           ${cicloId ? Prisma.sql`AND c."cicloEscolarId" = ${cicloId}` : Prisma.empty}
         WHERE a.activo = true
+          ${soloGruposDelNivel('a."grupoId"')}
         GROUP BY a.id, a.matricula, u.name, g.nombre
       `;
 
@@ -244,6 +262,7 @@ router.get(
           ON c."alumnoId" = a.id
           ${cicloId ? Prisma.sql`AND c."cicloEscolarId" = ${cicloId}` : Prisma.empty}
         WHERE g.activo = true
+          ${soloGruposDelNivel("g.id")}
         GROUP BY g.id, g.nombre, s.nombre, t.nombre
         ORDER BY g.nombre ASC
       `;

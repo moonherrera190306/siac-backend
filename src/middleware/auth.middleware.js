@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken";
 import prisma from "../lib/prisma.js";
+import { contexto } from "../lib/contexto.js";
 
 export const COOKIE_TOKEN = "siac_token";
 
@@ -50,7 +51,13 @@ export const verifyToken = async (req, res, next) => {
     // hay que comprobarlo contra la base.
     const user = await prisma.user.findUnique({
       where: { id: decoded.id },
-      select: { id: true, activo: true, role: true, name: true },
+      select: {
+        id: true,
+        activo: true,
+        role: true,
+        name: true,
+        nivelAcademico: { select: { clave: true } },
+      },
     });
 
     if (!user || !user.activo) {
@@ -60,7 +67,13 @@ export const verifyToken = async (req, res, next) => {
     // `name` se usa, por ejemplo, para las iniciales del cajero en el recibo.
     req.user = { ...decoded, role: user.role, name: user.name };
 
-    next();
+    // 🏫 Dirección y Secretaría con nivel solo ven ese nivel: el filtro
+    // lo aplica lib/prisma.js en cada consulta de esta petición.
+    const nivel = ["DIRECTOR", "SECRETARIA"].includes(user.role)
+      ? user.nivelAcademico?.clave ?? null
+      : null;
+
+    contexto.run({ nivel }, next);
   } catch (error) {
     return res.status(401).json({ message: "Token inválido" });
   }

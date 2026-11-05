@@ -13,6 +13,9 @@ export default defineConfig({
     seed: "node prisma/seed.js",
   },
   engine: "classic",
+  // Prisma 6.19 exige `datasource.url` aquí para `migrate`. Solo se declara
+  // si la variable existe, para no romper `generate` en el build.
+  ...(process.env.DATABASE_URL ? { datasource: { url: process.env.DATABASE_URL } } : {}),
   // ⚠️ No declaramos `datasource` aquí: `env("DATABASE_URL")` truena si la
   // variable no existe, y `prisma generate` corre en la fase de build del
   // servidor, donde todavía no hay conexión a la base. La URL ya está

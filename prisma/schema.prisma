@@ -159,6 +159,10 @@ model User {
 
   ultimoAcceso DateTime?
 
+  // 🏫 Dirección y Secretaría limitadas a un nivel. Vacío = ven ambos.
+  nivelAcademicoId String?
+  nivelAcademico   NivelAcademico? @relation(fields: [nivelAcademicoId], references: [id])
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -315,6 +319,7 @@ model NivelAcademico {
 
   programas    Programa[]
   trayectorias Trayectoria[]
+  usuarios     User[]
 
   createdAt DateTime @default(now())
 }
