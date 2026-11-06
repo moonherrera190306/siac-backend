@@ -145,6 +145,8 @@ function datosPublicos(user) {
     alumnoId: user.alumno?.id || null,
     // Directivos que también dan clase: el menú les agrega "Docencia".
     docenteId: user.docente?.id || null,
+    // Nivel del personal (Dirección/Secretaría); define la imagen del menú.
+    nivel: user.nivelAcademico?.clave ? nivelCanonico(user.nivelAcademico.clave) : null,
     name: user.name,
     email: user.email,
     role: user.role,
@@ -177,7 +179,11 @@ router.post("/login", async (req, res) => {
 
     const user = await prisma.user.findUnique({
       where: { email },
-      include: { alumno: true, docente: { select: { id: true } } },
+      include: {
+        alumno: true,
+        docente: { select: { id: true } },
+        nivelAcademico: { select: { clave: true } },
+      },
     });
 
     // 🔥 mensaje genérico: no revelamos si el email existe o no
@@ -268,7 +274,11 @@ router.get("/me", verifyToken, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
-      include: { alumno: true, docente: { select: { id: true } } },
+      include: {
+        alumno: true,
+        docente: { select: { id: true } },
+        nivelAcademico: { select: { clave: true } },
+      },
     });
 
     if (!user) {
@@ -296,7 +306,11 @@ router.post("/refresh", verifyToken, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
-      include: { alumno: true, docente: { select: { id: true } } },
+      include: {
+        alumno: true,
+        docente: { select: { id: true } },
+        nivelAcademico: { select: { clave: true } },
+      },
     });
 
     if (!user || !user.activo) {
