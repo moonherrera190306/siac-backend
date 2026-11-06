@@ -6,6 +6,7 @@ import prisma from "../lib/prisma.js";
 import { verifyToken, COOKIE_TOKEN } from "../middleware/auth.middleware.js";
 import { checkRole } from "../middleware/role.middleware.js";
 import { auditar } from "../lib/audit.js";
+import { nivelCanonico } from "../lib/contexto.js";
 
 const router = express.Router();
 
@@ -104,7 +105,8 @@ const selNivel = { select: { nivelAcademico: { select: { clave: true } } } };
 const selCarrera = { select: { programa: selNivel } };
 const selGrupo = { select: { semestre: { select: { carrera: selCarrera } } } };
 
-const claveDePrograma = (p) => p?.nivelAcademico?.clave;
+const claveDePrograma = (p) =>
+  p?.nivelAcademico?.clave ? nivelCanonico(p.nivelAcademico.clave) : undefined;
 
 async function nivelesDelUsuario(user) {
   const niveles = new Set();
@@ -141,6 +143,8 @@ function datosPublicos(user) {
   return {
     id: user.id,
     alumnoId: user.alumno?.id || null,
+    // Directivos que también dan clase: el menú les agrega "Docencia".
+    docenteId: user.docente?.id || null,
     name: user.name,
     email: user.email,
     role: user.role,
@@ -173,7 +177,7 @@ router.post("/login", async (req, res) => {
 
     const user = await prisma.user.findUnique({
       where: { email },
-      include: { alumno: true },
+      include: { alumno: true, docente: { select: { id: true } } },
     });
 
     // 🔥 mensaje genérico: no revelamos si el email existe o no
@@ -264,7 +268,7 @@ router.get("/me", verifyToken, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
-      include: { alumno: true },
+      include: { alumno: true, docente: { select: { id: true } } },
     });
 
     if (!user) {
@@ -292,7 +296,7 @@ router.post("/refresh", verifyToken, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
-      include: { alumno: true },
+      include: { alumno: true, docente: { select: { id: true } } },
     });
 
     if (!user || !user.activo) {

@@ -57,6 +57,7 @@ export const verifyToken = async (req, res, next) => {
         role: true,
         name: true,
         nivelAcademico: { select: { clave: true } },
+        docente: { select: { id: true } },
       },
     });
 
@@ -65,7 +66,7 @@ export const verifyToken = async (req, res, next) => {
     }
 
     // `name` se usa, por ejemplo, para las iniciales del cajero en el recibo.
-    req.user = { ...decoded, role: user.role, name: user.name };
+    req.user = { ...decoded, role: user.role, name: user.name, docenteId: user.docente?.id ?? null };
 
     // 🏫 Dirección y Secretaría con nivel solo ven ese nivel: el filtro
     // lo aplica lib/prisma.js en cada consulta de esta petición.

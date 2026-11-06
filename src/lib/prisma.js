@@ -1,5 +1,5 @@
 import { PrismaClient } from "@prisma/client"
-import { contexto } from "./contexto.js"
+import { contexto, clavesDe } from "./contexto.js"
 
 const base = new PrismaClient()
 
@@ -13,7 +13,7 @@ const base = new PrismaClient()
  *
  * El nivel cuelga de: Grupo → Semestre → Carrera → Programa → Nivel.
  */
-const enNivel = (clave) => ({ programa: { nivelAcademico: { clave } } })
+const enNivel = (clave) => ({ programa: { nivelAcademico: { clave: { in: clavesDe(clave) } } } })
 const grupoEn = (clave) => ({ semestre: { carrera: enNivel(clave) } })
 const alumnoEn = (clave) => ({
   OR: [{ grupo: grupoEn(clave) }, enNivel(clave), { carrera: enNivel(clave) }],
@@ -24,8 +24,8 @@ const FILTROS = {
   Grupo: grupoEn,
   Semestre: (c) => ({ carrera: enNivel(c) }),
   Carrera: enNivel,
-  Programa: (c) => ({ nivelAcademico: { clave: c } }),
-  NivelAcademico: (c) => ({ clave: c }),
+  Programa: (c) => ({ nivelAcademico: { clave: { in: clavesDe(c) } } }),
+  NivelAcademico: (c) => ({ clave: { in: clavesDe(c) } }),
   Materia: (c) => ({ OR: [{ semestre: { carrera: enNivel(c) } }, { semestreId: null }] }),
   AsignacionMateria: (c) => ({ grupo: grupoEn(c) }),
   Horario: (c) => ({ asignacion: { grupo: grupoEn(c) } }),

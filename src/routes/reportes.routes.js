@@ -5,7 +5,7 @@ import { aCSV } from "../lib/csv.js";
 import { reportePDF } from "../lib/pdf.js";
 import { verifyToken } from "../middleware/auth.middleware.js";
 import { checkRole } from "../middleware/role.middleware.js";
-import { contexto as peticion } from "../lib/contexto.js";
+import { contexto as peticion, clavesDe } from "../lib/contexto.js";
 
 const router = express.Router();
 
@@ -111,7 +111,7 @@ function soloGruposDelNivel(columna) {
     JOIN "Carrera" ca2 ON ca2.id = s2."carreraId"
     JOIN "Programa" p2 ON p2.id = ca2."programaId"
     JOIN "NivelAcademico" n2 ON n2.id = p2."nivelAcademicoId"
-    WHERE n2.clave = ${nivel})`;
+    WHERE n2.clave IN (${Prisma.join(clavesDe(nivel))}))`;
 }
 
 async function cicloDe(req) {

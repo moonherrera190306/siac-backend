@@ -1,3 +1,5 @@
+import { contexto } from "../lib/contexto.js";
+
 const isDev = process.env.NODE_ENV !== "production";
 
 export const checkRole = (roles = []) => {
@@ -24,10 +26,20 @@ export const checkRole = (roles = []) => {
       }
 
       // 🔥 CHECK
-      if (!roles.includes(userRole)) {
+      // 👨‍🏫 Un directivo que también da clase (tiene ficha de docente)
+      // entra a las rutas de maestro con su misma cuenta.
+      const comoDocente = roles.includes("MAESTRO") && Boolean(req.user.docenteId);
+
+      if (!roles.includes(userRole) && !comoDocente) {
         return res.status(403).json({
           message: "Acceso denegado",
         });
+      }
+
+      // Entró como maestro: ve sus grupos aunque sean de otro nivel.
+      if (!roles.includes(userRole) && comoDocente) {
+        const ctx = contexto.getStore();
+        if (ctx) ctx.nivel = null;
       }
 
       next();

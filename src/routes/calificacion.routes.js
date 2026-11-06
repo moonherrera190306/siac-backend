@@ -233,9 +233,9 @@ router.get(
         where: { id: req.params.asignacionId },
         include: {
           materia: true,
-          grupo: true,
+          grupo: { include: { semestre: true } },
           cicloEscolar: true,
-          docente: true,
+          docente: { include: { user: true } },
         },
       });
 
@@ -260,7 +260,7 @@ router.get(
         }
       }
 
-      const [alumnos, calificaciones, abiertas] = await Promise.all([
+      const [alumnos, calificaciones, abiertas, asistencias] = await Promise.all([
         prisma.alumno.findMany({
           where: { grupoId: asignacion.grupoId, activo: true },
           include: { user: true },
@@ -273,9 +273,25 @@ router.get(
           },
         }),
         columnasAbiertas(asignacion.cicloEscolarId),
+        prisma.asistenciaMensual.findMany({
+          where: {
+            materiaId: asignacion.materiaId,
+            cicloEscolarId: asignacion.cicloEscolarId,
+          },
+        }),
       ]);
 
       const porAlumno = new Map(calificaciones.map((c) => [c.alumnoId, c]));
+      const asisAlumno = new Map(asistencias.map((a) => [a.alumnoId, a]));
+
+      // % de faltas del ciclo, para la lista impresa del maestro.
+      const faltasPct = (alumnoId) => {
+        const a = asisAlumno.get(alumnoId);
+        if (!a) return null;
+        const faltas = a.faltasMes1 + a.faltasMes2 + a.faltasMes3 + a.faltasMes4;
+        const total = faltas + a.asisMes1 + a.asisMes2 + a.asisMes3 + a.asisMes4;
+        return total ? Math.round((faltas / total) * 100) : null;
+      };
 
       const filas = alumnos.map((a) => {
         const c = porAlumno.get(a.id);
@@ -297,6 +313,7 @@ router.get(
           EER: c?.especial ?? "",
           ND: c?.notaDefinitiva ?? "",
           articulo: c?.articulo ?? "",
+          faltasPct: faltasPct(a.id),
         };
       });
 
@@ -311,7 +328,9 @@ router.get(
             clave: asignacion.materia?.clave,
             tipoEvaluacion: asignacion.materia?.tipoEvaluacion,
             grupo: asignacion.grupo?.nombre,
+            semestre: asignacion.grupo?.semestre?.numero ?? null,
             ciclo: asignacion.cicloEscolar?.nombre,
+            docente: asignacion.docente?.nombre || asignacion.docente?.user?.name || "",
           },
           // PROM y ND se calculan solos: nunca se capturan.
           columnasAbiertas: abiertas.filter(
@@ -479,13 +498,43 @@ router.get(
         });
       }
 
-      const data = await prisma.calificacion.findMany({
-        where: { alumnoId },
-        include: { materia: true, cicloEscolar: true },
-        orderBy: { createdAt: "desc" },
-      });
+      // Todo lo que piden los documentos del alumno (kardex, boleta,
+      // constancias) se junta aquí, en el momento en que se solicitan.
+      const [data, inscripciones, asistencias, asignacionesActuales] = await Promise.all([
+        prisma.calificacion.findMany({
+          where: { alumnoId },
+          include: {
+            materia: { include: { semestre: true, trayectoria: true } },
+            cicloEscolar: true,
+          },
+          orderBy: { createdAt: "desc" },
+        }),
+        prisma.inscripcion.findMany({
+          where: { alumnoId },
+          include: { grupo: true, cicloEscolar: true },
+        }),
+        prisma.asistenciaMensual.findMany({ where: { alumnoId } }),
+        alumno.grupoId
+          ? prisma.asignacionMateria.findMany({
+              where: { grupoId: alumno.grupoId, cicloEscolar: { activo: true } },
+              include: { materia: true, cicloEscolar: true },
+            })
+          : [],
+      ]);
 
-      res.json({ success: true, data });
+      const materiasActuales = asignacionesActuales
+        .map((a) => a.materia)
+        .sort((x, y) => String(x.clave ?? x.nombre).localeCompare(String(y.clave ?? y.nombre)))
+        .map((m) => m.nombre);
+
+      res.json({
+        success: true,
+        data,
+        inscripciones,
+        asistencias,
+        materiasActuales,
+        cicloActual: asignacionesActuales[0]?.cicloEscolar ?? null,
+      });
     } catch (error) {
       console.error(error);
       res.status(500).json({
