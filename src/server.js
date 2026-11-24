@@ -2,6 +2,7 @@ import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
 import listEndpoints from "express-list-endpoints";
+import compression from "compression";
 
 // 🔥 ROUTES
 import adminRoutes from "./routes/admin.routes.js";
@@ -58,6 +59,7 @@ app.use(
 );
 
 // 🔥 BODY PARSER
+app.use(compression());
 app.use(express.json());
 
 // 🔥 RUTAS API
