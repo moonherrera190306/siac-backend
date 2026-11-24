@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "postinstall": "prisma generate",
-    "start": "prisma migrate deploy && node src/server.js",
+    "start": "node src/server.js",
     "users:list": "node src/scripts/listUsers.js",
     "users:create": "node src/scripts/createUsers.js",
     "users:reset": "node src/scripts/resetPassword.js",
@@ -24,6 +24,7 @@
   "dependencies": {
     "@prisma/client": "^6.0.0",
     "bcrypt": "^5.1.1",
+    "compression": "^1.8.2",
     "cors": "^2.8.5",
     "dotenv": "^17.0.0",
     "express": "^4.18.2",
